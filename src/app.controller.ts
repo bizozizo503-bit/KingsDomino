@@ -10,7 +10,7 @@ export class AppController {
       version: '1.0.0'
     };
   }
-
+@Get('games')
 games() {
   return [
     {

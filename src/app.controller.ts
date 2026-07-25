@@ -12,7 +12,16 @@ export class AppController {
   }
 
   @Get('games')
-  games() {
+games() {
+  return [
+    {
+      id: 1,
+      name: 'KingsDomino',
+      players: 4,
+      status: 'available'
+    }
+  ];
+}
     return [];
   }
 }

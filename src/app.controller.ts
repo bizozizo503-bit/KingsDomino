@@ -11,8 +11,9 @@ export class AppController {
     };
   }
 
-  @Get('games')
 games() {
+  return [
+    {
       id: 1,
       name: 'KingsDomino',
       players: 4,
@@ -20,6 +21,4 @@ games() {
     }
   ];
 }
-    return [];
-  }
 }

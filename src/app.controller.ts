@@ -1,12 +1,24 @@
 import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
 
   @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  home() {
+    return {
+      message: 'KingsDomino API is running!',
+      version: '1.0.0'
+    };
   }
+@Get('games')
+games() {
+  return [
+    {
+      id: 1,
+      name: 'KingsDomino',
+      players: 4,
+      status: 'available'
+    }
+  ];
+}
 }

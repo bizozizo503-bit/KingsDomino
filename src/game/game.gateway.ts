@@ -6,13 +6,9 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { RoomsService } from '../rooms/rooms.service';
+import { RoomsService, BoardSide } from '../rooms/rooms.service';
 
-@WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
-})
+@WebSocketGateway({ cors: { origin: '*' } })
 export class GameGateway {
   @WebSocketServer()
   server: Server;
@@ -21,12 +17,7 @@ export class GameGateway {
 
   @SubscribeMessage('joinRoom')
   handleJoin(
-    @MessageBody()
-    data: {
-      roomCode: string;
-      playerId: number;
-      name?: string;
-    },
+    @MessageBody() data: { roomCode: string; playerId: number; name?: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
@@ -35,14 +26,10 @@ export class GameGateway {
         Number(data.playerId),
         data.name || `Player${data.playerId}`,
       );
-
       client.join(room.code);
-
       this.server.to(room.code).emit('roomUpdated', this.publicRoom(room));
     } catch (error) {
-      client.emit('gameError', {
-        message: this.errorMessage(error),
-      });
+      client.emit('gameError', { message: this.errorMessage(error) });
     }
   }
 
@@ -50,38 +37,30 @@ export class GameGateway {
   handleStart(@MessageBody() data: { roomCode: string }) {
     try {
       const room = this.roomsService.startGame(data.roomCode);
-
       for (const playerId of room.players) {
-        const hand = room.gameState.hands[String(playerId)] || [];
-
         this.server.to(data.roomCode).emit('gameStarted', {
           roomCode: room.code,
           playerId,
-          hand,
+          hand: room.gameState.hands[String(playerId)] || [],
           currentPlayer: room.gameState.currentPlayer,
           board: room.gameState.board,
           players: room.players,
           playerNames: room.playerNames,
         });
       }
-
-      this.server
-        .to(data.roomCode)
-        .emit('roomUpdated', this.publicRoom(room));
+      this.server.to(data.roomCode).emit('roomUpdated', this.publicRoom(room));
     } catch (error) {
-      this.server.to(data.roomCode).emit('gameError', {
-        message: this.errorMessage(error),
-      });
+      this.server.to(data.roomCode).emit('gameError', { message: this.errorMessage(error) });
     }
   }
 
   @SubscribeMessage('playDomino')
   handlePlay(
-    @MessageBody()
-    data: {
+    @MessageBody() data: {
       roomCode: string;
       playerId: number;
       tileIndex: number;
+      side?: BoardSide;
     },
   ) {
     try {
@@ -89,6 +68,7 @@ export class GameGateway {
         data.roomCode,
         Number(data.playerId),
         Number(data.tileIndex),
+        data.side || 'right',
       );
 
       this.server.to(data.roomCode).emit('dominoPlayed', {
@@ -98,30 +78,19 @@ export class GameGateway {
         currentPlayer: result.room.gameState.currentPlayer,
         winner: result.winner,
         handsCount: Object.fromEntries(
-          Object.entries(result.room.gameState.hands).map(
-            ([id, hand]) => [id, hand.length],
-          ),
+          Object.entries(result.room.gameState.hands).map(([id, hand]) => [id, hand.length]),
         ),
       });
     } catch (error) {
-      this.server.to(data.roomCode).emit('gameError', {
-        message: this.errorMessage(error),
-      });
+      this.server.to(data.roomCode).emit('gameError', { message: this.errorMessage(error) });
     }
   }
 
   @SubscribeMessage('chat')
-  handleChat(
-    @MessageBody()
-    data: {
-      roomCode: string;
-      name: string;
-      message: string;
-    },
-  ) {
+  handleChat(@MessageBody() data: { roomCode: string; name: string; message: string }) {
     this.server.to(data.roomCode).emit('chat', {
       name: data.name,
-      message: data.message,
+      message: String(data.message || '').slice(0, 500),
     });
   }
 
@@ -141,6 +110,7 @@ export class GameGateway {
   }
 
   private errorMessage(error: any) {
+    const message = error?.message;
     const map: Record<string, string> = {
       ROOM_NOT_FOUND: 'الغرفة غير موجودة',
       GAME_ALREADY_STARTED: 'اللعبة بدأت بالفعل',
@@ -151,7 +121,6 @@ export class GameGateway {
       INVALID_TILE: 'قطعة الدومينو غير صحيحة',
       INVALID_PLAYER: 'اللاعب غير صحيح',
     };
-
-    return map[error?.message] || 'حدث خطأ غير متوقع';
+    return map[message] || message || 'حدث خطأ غير متوقع';
   }
 }

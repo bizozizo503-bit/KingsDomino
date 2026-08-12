@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "KingsDomino",
+    "slug": "kingsdomino",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.kingsdomino.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#090b12"
+      }
+    }
+  }
+}

@@ -1,13 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DominoService } from '../game/domino.service';
+import { Domino } from '../game/domino.interface';
+
+export type BoardSide = 'left' | 'right';
 
 export interface GameState {
   players: number[];
-  dominoDeck: any[];
+  dominoDeck: Domino[];
   started: boolean;
   currentPlayer: number;
-  board: any[];
-  hands: Record<string, any[]>;
+  board: Domino[];
+  hands: Record<string, Domino[]>;
 }
 
 export interface Room {
@@ -28,16 +31,11 @@ export class RoomsService {
 
   constructor(private readonly dominoService: DominoService) {}
 
-  create(data: {
-    name: string;
-    players: number;
-    host: string;
-    status: string;
-  }): Room {
-    const code = Math.random()
-      .toString(36)
-      .substring(2, 8)
-      .toUpperCase();
+  create(data: { name: string; players: number; host: string; status: string }): Room {
+    let code = '';
+    do {
+      code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    } while (this.findByCode(code));
 
     const room: Room = {
       code,
@@ -62,115 +60,96 @@ export class RoomsService {
     return room;
   }
 
-  findAll() {
+  findAll(): Room[] {
     return this.rooms;
   }
 
-  findByCode(code: string) {
-    return this.rooms.find(
-      (room) => room.code.toUpperCase() === code.toUpperCase(),
-    );
+  findByCode(code: string): Room | undefined {
+    return this.rooms.find((room) => room.code.toUpperCase() === code.toUpperCase());
   }
 
-  joinRoom(code: string, playerId: number, name: string) {
+  joinRoom(code: string, playerId: number, name: string): Room {
     const room = this.findByCode(code);
-
-    if (!room) {
-      throw new Error('ROOM_NOT_FOUND');
-    }
-
-    if (room.started) {
-      throw new Error('GAME_ALREADY_STARTED');
-    }
-
-    if (!Number.isFinite(playerId)) {
-      throw new Error('INVALID_PLAYER');
-    }
+    if (!room) throw new NotFoundException('الغرفة غير موجودة');
+    if (room.started) throw new ConflictException('اللعبة بدأت بالفعل');
+    if (!Number.isInteger(playerId) || playerId <= 0) throw new BadRequestException('اللاعب غير صحيح');
 
     if (!room.players.includes(playerId)) {
-      if (room.players.length >= room.maxPlayers) {
-        throw new Error('ROOM_FULL');
-      }
-
+      if (room.players.length >= room.maxPlayers) throw new ConflictException('الغرفة ممتلئة');
       room.players.push(playerId);
       room.gameState.players.push(playerId);
     }
 
-    room.playerNames[String(playerId)] = name;
-
+    room.playerNames[String(playerId)] = String(name || `Player${playerId}`).slice(0, 24);
     return room;
   }
 
-  startGame(code: string) {
+  startGame(code: string): Room {
     const room = this.findByCode(code);
+    if (!room) throw new NotFoundException('الغرفة غير موجودة');
+    if (room.players.length < 2) throw new BadRequestException('نحتاج لاعبين على الأقل');
+    if (room.started) return room;
 
-    if (!room) {
-      throw new Error('ROOM_NOT_FOUND');
-    }
-
-    if (room.players.length < 2) {
-      throw new Error('NEED_TWO_PLAYERS');
-    }
-
-    if (room.started) {
-      return room;
-    }
-
-    let deck = this.dominoService.createDeck();
-    deck = this.dominoService.shuffle(deck);
-
-    room.gameState.dominoDeck = deck;
+    room.gameState.dominoDeck = this.dominoService.shuffle(this.dominoService.createDeck());
     room.gameState.board = [];
     room.gameState.hands = {};
 
     for (const playerId of room.players) {
-      room.gameState.hands[String(playerId)] =
-        room.gameState.dominoDeck.splice(0, 7);
+      room.gameState.hands[String(playerId)] = room.gameState.dominoDeck.splice(0, 7);
     }
 
     room.started = true;
     room.status = 'playing';
     room.gameState.started = true;
     room.gameState.currentPlayer = room.players[0];
-
     return room;
   }
 
-  playDomino(code: string, playerId: number, tileIndex: number) {
+  playDomino(code: string, playerId: number, tileIndex: number, side: BoardSide = 'right') {
     const room = this.findByCode(code);
-
-    if (!room || !room.started) {
-      throw new Error('GAME_NOT_STARTED');
-    }
-
-    if (room.gameState.currentPlayer !== playerId) {
-      throw new Error('NOT_YOUR_TURN');
-    }
+    if (!room || !room.started) throw new BadRequestException('اللعبة لم تبدأ بعد');
+    if (room.gameState.currentPlayer !== playerId) throw new BadRequestException('ليس دورك الآن');
+    if (side !== 'left' && side !== 'right') throw new BadRequestException('جهة اللعب غير صحيحة');
 
     const hand = room.gameState.hands[String(playerId)] || [];
-    const tile = hand[tileIndex];
+    if (!Number.isInteger(tileIndex) || tileIndex < 0 || tileIndex >= hand.length) {
+      throw new BadRequestException('قطعة الدومينو غير صحيحة');
+    }
 
-    if (!tile) {
-      throw new Error('INVALID_TILE');
+    const original = hand[tileIndex];
+    let tile: Domino = { ...original };
+    const board = room.gameState.board;
+
+    if (board.length > 0) {
+      if (side === 'right') {
+        const edge = board[board.length - 1].right;
+        if (tile.left !== edge) {
+          if (tile.right === edge) tile = { left: tile.right, right: tile.left };
+          else throw new BadRequestException(`لا يمكن وضع ${original.left}-${original.right} على اليمين`);
+        }
+      } else {
+        const edge = board[0].left;
+        if (tile.right !== edge) {
+          if (tile.left === edge) tile = { left: tile.right, right: tile.left };
+          else throw new BadRequestException(`لا يمكن وضع ${original.left}-${original.right} على اليسار`);
+        }
+      }
     }
 
     hand.splice(tileIndex, 1);
-    room.gameState.board.push(tile);
+    if (side === 'left') board.unshift(tile);
+    else board.push(tile);
 
-    const currentIndex = room.players.indexOf(playerId);
-    const nextIndex = (currentIndex + 1) % room.players.length;
-    room.gameState.currentPlayer = room.players[nextIndex];
-
-    if (hand.length === 0) {
+    const winner = hand.length === 0 ? playerId : null;
+    if (winner !== null) {
       room.status = 'finished';
       room.started = false;
       room.gameState.started = false;
+    } else {
+      const currentIndex = room.players.indexOf(playerId);
+      room.gameState.currentPlayer = room.players[(currentIndex + 1) % room.players.length];
     }
 
-    return {
-      room,
-      tile,
-      winner: hand.length === 0 ? playerId : null,
-    };
+    return { room, tile, winner };
   }
 }

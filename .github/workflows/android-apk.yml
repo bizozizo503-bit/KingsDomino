@@ -57,3 +57,5 @@ jobs:
           name: KingsDomino-APK
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+# Release build is intentionally retriggered whenever mobile or this workflow changes.

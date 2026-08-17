@@ -1,42 +1,96 @@
-import {
+﻿import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
+  WsException,
 } from '@nestjs/websockets';
+import { UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { RoomsService } from '../rooms/rooms.service';
+import { WsJwtGuard } from '../common/guards/ws-jwt.guard';
+import { JwtService } from '@nestjs/jwt';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
+  cors: { origin: '*' },
 })
-export class GameGateway {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly roomsService: RoomsService) {}
+  private clientRooms = new Map<string, Set<string>>();
+  private readonly MAX_CHAT_LENGTH = 200;
+
+  constructor(
+    private readonly roomsService: RoomsService,
+    private readonly jwtService: JwtService,
+  ) {}
+
+  async handleConnection(client: Socket) {
+    const token =
+      client.handshake?.auth?.token ||
+      client.handshake?.headers?.authorization?.replace('Bearer ', '');
+
+    if (!token) {
+      client.emit('gameError', { message: 'غير مصرح — يلزم تسجيل الدخول' });
+      client.disconnect();
+      return;
+    }
+
+    try {
+      const payload = this.jwtService.verify(token);
+      (client as any).userId = payload.sub;
+      (client as any).username = payload.username;
+    } catch {
+      client.emit('gameError', { message: 'توكن غير صالح' });
+      client.disconnect();
+    }
+  }
+
+  handleDisconnect(client: Socket) {
+    const userId = (client as any).userId as string;
+    const rooms = this.clientRooms.get(client.id);
+
+    if (userId && rooms) {
+      for (const roomCode of rooms) {
+        this.roomsService.handleDisconnect(roomCode, userId);
+      }
+    }
+
+    this.clientRooms.delete(client.id);
+  }
 
   @SubscribeMessage('joinRoom')
   handleJoin(
     @MessageBody()
-    data: {
-      roomCode: string;
-      playerId: number;
-      name?: string;
-    },
+    data: { roomCode: string; name?: string },
     @ConnectedSocket() client: Socket,
   ) {
+    const userId = (client as any).userId as string;
+    const username = (client as any).username as string;
+
+    if (!userId) {
+      client.emit('gameError', { message: 'غير مصرح' });
+      return;
+    }
+
     try {
       const room = this.roomsService.joinRoom(
         data.roomCode,
-        Number(data.playerId),
-        data.name || `Player${data.playerId}`,
+        userId,
+        data.name || username,
       );
 
       client.join(room.code);
+      client.join(userId);
+
+      if (!this.clientRooms.has(client.id)) {
+        this.clientRooms.set(client.id, new Set());
+      }
+      this.clientRooms.get(client.id)!.add(room.code);
 
       this.server.to(room.code).emit('roomUpdated', this.publicRoom(room));
     } catch (error) {
@@ -47,27 +101,45 @@ export class GameGateway {
   }
 
   @SubscribeMessage('startGame')
-  handleStart(@MessageBody() data: { roomCode: string }) {
+  handleStart(
+    @MessageBody() data: { roomCode: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = (client as any).userId as string;
+
+    if (!userId) {
+      client.emit('gameError', { message: 'غير مصرح' });
+      return;
+    }
+
     try {
-      const room = this.roomsService.startGame(data.roomCode);
+      const room = this.roomsService.getRoom(data.roomCode);
+      if (!room) {
+        client.emit('gameError', { message: this.errorMessage({ message: 'ROOM_NOT_FOUND' }) });
+        return;
+      }
 
-      for (const playerId of room.players) {
-        const hand = room.gameState.hands[String(playerId)] || [];
+      if (room.host !== userId) {
+        client.emit('gameError', { message: this.errorMessage({ message: 'NOT_HOST' }) });
+        return;
+      }
 
-        this.server.to(data.roomCode).emit('gameStarted', {
-          roomCode: room.code,
-          playerId,
+      const startedRoom = this.roomsService.startGame(data.roomCode, userId);
+
+      for (const playerId of startedRoom.players) {
+        const hand = startedRoom.gameState.hands[playerId] || [];
+
+        this.server.to(playerId).emit('gameStarted', {
+          roomCode: startedRoom.code,
           hand,
-          currentPlayer: room.gameState.currentPlayer,
-          board: room.gameState.board,
-          players: room.players,
-          playerNames: room.playerNames,
+          currentPlayer: startedRoom.gameState.currentPlayer,
+          board: startedRoom.gameState.board,
+          players: startedRoom.players,
+          playerNames: startedRoom.playerNames,
         });
       }
 
-      this.server
-        .to(data.roomCode)
-        .emit('roomUpdated', this.publicRoom(room));
+      this.server.to(startedRoom.code).emit('roomUpdated', this.publicRoom(startedRoom));
     } catch (error) {
       this.server.to(data.roomCode).emit('gameError', {
         message: this.errorMessage(error),
@@ -78,33 +150,40 @@ export class GameGateway {
   @SubscribeMessage('playDomino')
   handlePlay(
     @MessageBody()
-    data: {
-      roomCode: string;
-      playerId: number;
-      tileIndex: number;
-    },
+    data: { roomCode: string; tileIndex: number },
+    @ConnectedSocket() client: Socket,
   ) {
+    const userId = (client as any).userId as string;
+
+    if (!userId) {
+      client.emit('gameError', { message: 'غير مصرح' });
+      return;
+    }
+
     try {
       const result = this.roomsService.playDomino(
         data.roomCode,
-        Number(data.playerId),
+        userId,
         Number(data.tileIndex),
       );
 
-      this.server.to(data.roomCode).emit('dominoPlayed', {
-        playerId: data.playerId,
-        tile: result.tile,
-        board: result.room.gameState.board,
-        currentPlayer: result.room.gameState.currentPlayer,
-        winner: result.winner,
-        handsCount: Object.fromEntries(
-          Object.entries(result.room.gameState.hands).map(
-            ([id, hand]) => [id, hand.length],
+      for (const playerId of result.room.players) {
+        const hand = result.room.gameState.hands[playerId] || [];
+        this.server.to(playerId).emit('dominoPlayed', {
+          tile: playerId === userId ? result.tile : null,
+          board: result.room.gameState.board,
+          currentPlayer: result.room.gameState.currentPlayer,
+          winner: result.winner,
+          myHandCount: hand.length,
+          handsCount: Object.fromEntries(
+            Object.entries(result.room.gameState.hands).map(
+              ([id, h]) => [id, h.length],
+            ),
           ),
-        ),
-      });
+        });
+      }
     } catch (error) {
-      this.server.to(data.roomCode).emit('gameError', {
+      client.emit('gameError', {
         message: this.errorMessage(error),
       });
     }
@@ -113,15 +192,28 @@ export class GameGateway {
   @SubscribeMessage('chat')
   handleChat(
     @MessageBody()
-    data: {
-      roomCode: string;
-      name: string;
-      message: string;
-    },
+    data: { roomCode: string; message: string },
+    @ConnectedSocket() client: Socket,
   ) {
+    const userId = (client as any).userId as string;
+    const username = (client as any).username as string;
+
+    if (!userId) return;
+
+    const rooms = this.clientRooms.get(client.id);
+    if (!rooms || !rooms.has(data.roomCode)) {
+      client.emit('gameError', { message: this.errorMessage({ message: 'NOT_IN_ROOM' }) });
+      return;
+    }
+
+    const trimmed = (data.message || '').trim();
+    if (trimmed.length === 0 || trimmed.length > this.MAX_CHAT_LENGTH) {
+      return;
+    }
+
     this.server.to(data.roomCode).emit('chat', {
-      name: data.name,
-      message: data.message,
+      name: username,
+      message: trimmed,
     });
   }
 
@@ -148,8 +240,12 @@ export class GameGateway {
       NEED_TWO_PLAYERS: 'نحتاج لاعبين على الأقل',
       GAME_NOT_STARTED: 'اللعبة لم تبدأ بعد',
       NOT_YOUR_TURN: 'ليس دورك الآن',
+      NOT_HOST: 'فقط صاحب الغرفة يمكنه بدء اللعبة',
       INVALID_TILE: 'قطعة الدومينو غير صحيحة',
+      INVALID_PLACEMENT: 'القطعة لا تتطابق مع طرفي اللوحة',
       INVALID_PLAYER: 'اللاعب غير صحيح',
+      NOT_IN_ROOM: 'أنت لست عضواً في هذه الغرفة',
+      DISCONNECTED_PLAYER: 'تم قطع اتصال اللاعب، يرجى الانتظار',
     };
 
     return map[error?.message] || 'حدث خطأ غير متوقع';

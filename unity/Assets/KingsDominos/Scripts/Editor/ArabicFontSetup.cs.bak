@@ -1,0 +1,119 @@
+﻿using System.IO;
+using UnityEditor;
+using UnityEngine;
+using TMPro;
+using UnityEngine.TextCore.LowLevel;
+
+[InitializeOnLoad]
+public static class ArabicFontSetup
+{
+    private const string FontPath =
+        "Assets/KingsDominos/Fonts/ArabicArial.ttf";
+
+    private const string CharactersPath =
+        "Assets/KingsDominos/Fonts/ArabicCharacters.txt";
+
+    private const string OutputFolder =
+        "Assets/Resources/KingsDominosFonts";
+
+    private const string AssetPath =
+        OutputFolder + "/ArabicArial SDF.asset";
+
+    static ArabicFontSetup()
+    {
+        EditorApplication.delayCall += AutoCreate;
+    }
+
+    private static void AutoCreate()
+    {
+        if (EditorApplication.isPlaying)
+            return;
+
+        CreateArabicFontAsset();
+    }
+
+    [MenuItem("Tools/KingsDominos/Create Arabic Font Asset")]
+    public static void CreateArabicFontAsset()
+    {
+        Debug.Log("=== KingsDominos Arabic Font: START ===");
+
+        Font sourceFont = AssetDatabase.LoadAssetAtPath<Font>(FontPath);
+
+        if (sourceFont == null)
+        {
+            Debug.LogError("ArabicArial.ttf NOT FOUND: " + FontPath);
+            return;
+        }
+
+        Debug.Log("Arabic TTF FOUND: " + sourceFont.name);
+
+        if (!AssetDatabase.IsValidFolder("Assets/Resources"))
+            AssetDatabase.CreateFolder("Assets", "Resources");
+
+        if (!AssetDatabase.IsValidFolder(OutputFolder))
+            AssetDatabase.CreateFolder("Assets/Resources", "KingsDominosFonts");
+
+        AssetDatabase.Refresh();
+
+        if (File.Exists(AssetPath))
+        {
+            AssetDatabase.DeleteAsset(AssetPath);
+            AssetDatabase.Refresh();
+        }
+
+        TMP_FontAsset fontAsset = TMP_FontAsset.CreateFontAsset(
+            sourceFont,
+            90,
+            9,
+            GlyphRenderMode.SDFAA,
+            2048,
+            2048
+        );
+
+        if (fontAsset == null)
+        {
+            Debug.LogError("FAILED TO CREATE TMP FONT ASSET");
+            return;
+        }
+
+        fontAsset.name = "ArabicArial SDF";
+
+        AssetDatabase.CreateAsset(fontAsset, AssetPath);
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        if (File.Exists(CharactersPath))
+        {
+            string characters = File.ReadAllText(CharactersPath).Trim();
+
+            if (!string.IsNullOrEmpty(characters))
+            {
+                uint[] missingCharacters;
+
+                bool success = fontAsset.TryAddCharacters(
+                    characters,
+                    out missingCharacters
+                );
+
+                Debug.Log(
+                    "Arabic characters processed. Success=" +
+                    success +
+                    " Missing=" +
+                    (missingCharacters == null
+                        ? 0
+                        : missingCharacters.Length)
+                );
+            }
+        }
+
+        EditorUtility.SetDirty(fontAsset);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        Debug.Log(
+            "=== KingsDominos Arabic Font: SUCCESS ===\n" +
+            AssetPath
+        );
+    }
+}

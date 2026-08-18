@@ -2,12 +2,14 @@ import { Injectable, ConflictException, NotFoundException } from '@nestjs/common
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { WalletService } from '../wallet/wallet.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
+    private walletService: WalletService,
   ) {}
 
   async findByUsername(username: string): Promise<User | null> {
@@ -49,7 +51,9 @@ export class UsersService {
       ...data,
       display_name: data.display_name || data.username,
     });
-    return this.usersRepository.save(user);
+    const savedUser = await this.usersRepository.save(user);
+    await this.walletService.getOrCreateWallet(savedUser.id);
+    return savedUser;
   }
 
   async updateProfile(

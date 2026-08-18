@@ -18,43 +18,43 @@ export class CouponsService {
   ) {}
 
   async redeem(userId: string, code: string) {
-    const coupon = await this.couponRepo.findOne({
-      where: { code: code.toUpperCase(), is_active: true },
-    });
-
-    if (!coupon) {
-      throw new NotFoundException('الكوبون غير موجود أو منتهي الصلاحية');
-    }
-
-    if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
-      throw new BadRequestException('انتهت صلاحية هذا الكوبون');
-    }
-
-    const userRedemptionCount = await this.redemptionRepo.count({
-      where: { coupon_id: coupon.id, user_id: userId },
-    });
-
-    if (userRedemptionCount >= coupon.max_redemptions_per_user) {
-      throw new ConflictException('لقد استخدمت هذا الكوبون بالحد الأقصى المسموح');
-    }
-
-    if (coupon.max_redemptions_total) {
-      const totalRedemptions = await this.redemptionRepo.count({
-        where: { coupon_id: coupon.id },
-      });
-      if (totalRedemptions >= coupon.max_redemptions_total) {
-        throw new BadRequestException('تم استنفاد جميع مرات الاستبدال لهذا الكوبون');
-      }
-    }
-
-    const amount = parseInt(coupon.reward_amount, 10);
-    const idempotencyKey = `coupon:${coupon.id}:${userId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
+      // Serializing redemptions per coupon makes both per-user and global limits atomic.
+      const coupon = await queryRunner.manager.findOne(Coupon, {
+        where: { code: code.toUpperCase(), is_active: true },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!coupon) {
+        throw new NotFoundException('الكوبون غير موجود أو منتهي الصلاحية');
+      }
+
+      if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+        throw new BadRequestException('انتهت صلاحية هذا الكوبون');
+      }
+
+      const userRedemptionCount = await queryRunner.manager.count(CouponRedemption, {
+        where: { coupon_id: coupon.id, user_id: userId },
+      });
+      if (userRedemptionCount >= coupon.max_redemptions_per_user) {
+        throw new ConflictException('لقد استخدمت هذا الكوبون بالحد الأقصى المسموح');
+      }
+
+      if (coupon.max_redemptions_total !== null) {
+        const totalRedemptions = await queryRunner.manager.count(CouponRedemption, {
+          where: { coupon_id: coupon.id },
+        });
+        if (totalRedemptions >= coupon.max_redemptions_total) {
+          throw new BadRequestException('تم استنفاد جميع مرات الاستبدال لهذا الكوبون');
+        }
+      }
+
+      const amount = parseInt(coupon.reward_amount, 10);
+      const idempotencyKey = `coupon:${coupon.id}:${userId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
       const wallet = await this.walletService.creditWithQueryRunner(
         queryRunner,
         userId,

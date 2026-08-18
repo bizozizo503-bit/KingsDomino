@@ -10,7 +10,7 @@ import {
 import { Coupon } from './coupon.entity';
 
 @Entity('coupon_redemptions')
-@Index('IDX_coupon_user', ['coupon_id', 'user_id'])
+@Index('UQ_coupon_redemption_coupon_user', ['coupon_id', 'user_id'], { unique: true })
 export class CouponRedemption {
   @PrimaryGeneratedColumn('uuid')
   id: string;

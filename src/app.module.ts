@@ -12,12 +12,20 @@ import { WalletModule } from './wallet/wallet.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { GameModule } from './game/game.module';
+import { GamesModule } from './games/games.module';
+import { SocialModule } from './social/social.module';
 
 import { User } from './users/entities/user.entity';
 import { Wallet } from './wallet/entities/wallet.entity';
 import { WalletTransaction } from './wallet/entities/wallet-transaction.entity';
 import { Coupon } from './coupons/entities/coupon.entity';
 import { CouponRedemption } from './coupons/entities/coupon-redemption.entity';
+import { GameSession } from './games/core/entities/game-session.entity';
+import { LeaderboardEntry } from './games/core/entities/leaderboard.entity';
+import { PlayerProfile } from './social/entities/player-profile.entity';
+import { Friendship } from './social/entities/friendship.entity';
+import { ChatMessage } from './social/entities/chat-message.entity';
+import { Notification } from './social/entities/notification.entity';
 
 @Module({
   imports: [
@@ -54,6 +62,8 @@ import { CouponRedemption } from './coupons/entities/coupon-redemption.entity';
     CouponsModule,
     RoomsModule,
     GameModule,
+    GamesModule,
+    SocialModule,
   ],
   providers: [
     {

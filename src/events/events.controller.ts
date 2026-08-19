@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query, Req, UseGuards, Body } from '@nest
 import { AuthGuard } from '@nestjs/passport';
 import { EventService } from './event.service';
 import { EventType } from './entities/event.entity';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('events')
 @UseGuards(AuthGuard('jwt'))
@@ -9,6 +10,7 @@ export class EventsController {
   constructor(private readonly eventService: EventService) {}
 
   @Post('create')
+  @UseGuards(AdminGuard)
   async createEvent(
     @Body() body: {
       name: string;
@@ -60,6 +62,7 @@ export class EventsController {
   }
 
   @Post(':id/progress')
+  @UseGuards(AdminGuard)
   async updateProgress(
     @Param('id') id: string,
     @Req() req: any,
@@ -85,11 +88,13 @@ export class EventsController {
   }
 
   @Post(':id/activate')
+  @UseGuards(AdminGuard)
   async activateEvent(@Param('id') id: string) {
     return this.eventService.activateEvent(id);
   }
 
   @Post(':id/finish')
+  @UseGuards(AdminGuard)
   async finishEvent(@Param('id') id: string) {
     return this.eventService.finishEvent(id);
   }

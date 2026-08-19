@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query, Req, UseGuards, Body } from '@nest
 import { AuthGuard } from '@nestjs/passport';
 import { TournamentService } from './tournament.service';
 import { TournamentStatus, TournamentType } from './entities/tournament.entity';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('tournaments')
 @UseGuards(AuthGuard('jwt'))
@@ -9,6 +10,7 @@ export class TournamentsController {
   constructor(private readonly tournamentService: TournamentService) {}
 
   @Post('create')
+  @UseGuards(AdminGuard)
   async createTournament(
     @Req() req: any,
     @Body() body: {
@@ -53,11 +55,13 @@ export class TournamentsController {
   }
 
   @Post(':id/start')
+  @UseGuards(AdminGuard)
   async startTournament(@Param('id') id: string) {
     return this.tournamentService.startTournament(id);
   }
 
   @Post(':id/match/:matchId/result')
+  @UseGuards(AdminGuard)
   async recordMatchResult(
     @Param('id') id: string,
     @Param('matchId') matchId: string,
@@ -82,6 +86,7 @@ export class TournamentsController {
   }
 
   @Post(':id/finish')
+  @UseGuards(AdminGuard)
   async finishTournament(@Param('id') id: string) {
     return this.tournamentService.finishTournament(id);
   }

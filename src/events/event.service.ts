@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { GameEvent, EventStatus, PlayerEventProgress } from './entities/event.entity';
 import { WalletService } from '../wallet/wallet.service';
 import { TransactionSource } from '../wallet/entities/wallet-transaction.entity';
@@ -20,6 +20,7 @@ export class EventService {
     private walletService: WalletService,
     private profileService: ProfileService,
     private notificationService: NotificationService,
+    private dataSource: DataSource,
   ) {}
 
   async createEvent(data: {
@@ -128,40 +129,53 @@ export class EventService {
     message: string;
   }> {
     const event = await this.getEvent(eventId);
-
-    const progress = await this.progressRepo.findOne({
-      where: { event_id: eventId, user_id: userId },
-    });
-
-    if (!progress) throw new NotFoundException('No progress found');
-    if (!progress.is_completed) throw new BadRequestException('Event not completed');
-    if (progress.is_reward_claimed) throw new BadRequestException('Already claimed');
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
     let totalGold = 0;
     let totalXp = 0;
 
-    for (const mission of event.missions || []) {
-      totalGold += mission.reward_gold;
-      totalXp += mission.reward_xp;
-    }
+    try {
+      const progress = await queryRunner.manager.findOne(PlayerEventProgress, {
+        where: { event_id: eventId, user_id: userId },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    if (totalGold > 0) {
-      await this.walletService.credit(
-        userId,
-        totalGold,
-        TransactionSource.OTHER,
-        `event_reward:${eventId}:${userId}:${Date.now()}`,
-        eventId,
-        { eventId, missions: Object.keys(progress.mission_progress) },
-      );
+      if (!progress) throw new NotFoundException('No progress found');
+      if (!progress.is_completed) throw new BadRequestException('Event not completed');
+      if (progress.is_reward_claimed) throw new BadRequestException('Already claimed');
+
+      for (const mission of event.missions || []) {
+        totalGold += mission.reward_gold;
+        totalXp += mission.reward_xp;
+      }
+
+      if (totalGold > 0) {
+        await this.walletService.creditWithQueryRunner(
+          queryRunner,
+          userId,
+          totalGold,
+          TransactionSource.OTHER,
+          `event_reward:${eventId}:${userId}`,
+          eventId,
+          { eventId, missions: Object.keys(progress.mission_progress) },
+        );
+      }
+
+      progress.is_reward_claimed = true;
+      await queryRunner.manager.save(progress);
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
 
     if (totalXp > 0) {
       await this.profileService.addXp(userId, totalXp);
     }
-
-    progress.is_reward_claimed = true;
-    await this.progressRepo.save(progress);
 
     this.logger.log(`User ${userId} claimed event reward: ${totalGold} gold, ${totalXp} xp`);
 

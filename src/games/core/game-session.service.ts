@@ -28,6 +28,14 @@ export class GameSessionService {
     playerNames: Record<string, string>,
     config?: Record<string, any>,
   ): Promise<GameSession> {
+    const registration = this.gameRegistry.getGame(gameId);
+    if (!registration) throw new Error('GAME_NOT_FOUND');
+    const uniquePlayers = [...new Set(playerIds)];
+    if (uniquePlayers.length !== playerIds.length ||
+        uniquePlayers.length < registration.metadata.minPlayers ||
+        uniquePlayers.length > registration.metadata.maxPlayers) {
+      throw new Error('INVALID_PLAYER_COUNT');
+    }
     const session = this.sessionRepo.create({
       game_id: gameId,
       room_code: roomCode,
@@ -43,9 +51,11 @@ export class GameSessionService {
     return saved;
   }
 
-  async startSession(sessionId: string): Promise<ActiveSession> {
+  async startSession(sessionId: string, requesterId?: string): Promise<ActiveSession> {
     const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
     if (!session) throw new Error('SESSION_NOT_FOUND');
+    if (requesterId && !session.player_ids.includes(requesterId)) throw new Error('NOT_SESSION_PLAYER');
+    if (session.status !== SessionStatus.WAITING) throw new Error('SESSION_NOT_WAITING');
 
     const gameInstance = this.gameRegistry.createGameInstance(session.game_id);
 
@@ -74,7 +84,7 @@ export class GameSessionService {
     playerId: string,
     action: string,
     data: Record<string, any>,
-  ): Promise<{ update: GameStateUpdate; gameOver: boolean; result?: any }> {
+  ): Promise<{ update: GameStateUpdate; gameOver: boolean; result?: any; activeSession?: ActiveSession }> {
     const active = this.activeSessions.get(sessionId);
     if (!active) throw new Error('SESSION_NOT_ACTIVE');
 
@@ -92,15 +102,18 @@ export class GameSessionService {
       active.session.finish_reason = result.reason;
 
       await this.sessionRepo.save(active.session);
-      this.activeSessions.delete(sessionId);
 
-      return { update, gameOver: true, result };
+      return { update, gameOver: true, result, activeSession: active };
     }
 
     active.session.state = active.gameInstance.getStateForPlayer(null as any);
     await this.sessionRepo.save(active.session);
 
     return { update, gameOver: false };
+  }
+
+  removeActiveSession(sessionId: string): void {
+    this.activeSessions.delete(sessionId);
   }
 
   getActiveSession(sessionId: string): ActiveSession | undefined {

@@ -24,6 +24,9 @@ export class Wallet {
   @Column({ type: 'bigint', default: 12500 })
   balance: string;
 
+  @Column({ type: 'bigint', default: 0 })
+  gems_balance: string;
+
   @Column({ type: 'int', default: 1 })
   version: number;
 

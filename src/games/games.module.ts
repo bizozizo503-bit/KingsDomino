@@ -12,6 +12,8 @@ import { GamesGateway } from './games.gateway';
 import { GamesController } from './games.controller';
 import { RewardsModule } from '../rewards/rewards.module';
 import { SocialModule } from '../social/social.module';
+import { UsersModule } from '../users/users.module';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import { SocialModule } from '../social/social.module';
     }),
     forwardRef(() => RewardsModule),
     SocialModule,
+    UsersModule,
+    CommonModule,
   ],
   controllers: [GamesController],
   providers: [

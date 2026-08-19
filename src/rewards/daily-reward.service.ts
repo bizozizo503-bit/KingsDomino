@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { DailyReward } from './entities/daily-reward.entity';
 import { WalletService } from '../wallet/wallet.service';
 import { TransactionSource } from '../wallet/entities/wallet-transaction.entity';
@@ -27,6 +27,7 @@ export class DailyRewardService {
     private dailyRewardRepo: Repository<DailyReward>,
     private walletService: WalletService,
     private profileService: ProfileService,
+    private dataSource: DataSource,
   ) {}
 
   async getOrCreate(userId: string): Promise<DailyReward> {
@@ -51,70 +52,102 @@ export class DailyRewardService {
     day: number;
     message: string;
   }> {
-    const reward = await this.getOrCreate(userId);
-    const now = Date.now();
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (reward.last_claim_at > 0) {
-      const timeSinceLastClaim = now - reward.last_claim_at;
-      const daysSinceLastClaim = Math.floor(timeSinceLastClaim / this.MS_PER_DAY);
+    try {
+      const reward = await queryRunner.manager.findOne(DailyReward, {
+        where: { user_id: userId },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-      if (daysSinceLastClaim < 1) {
-        throw new BadRequestException('لقد حصلت على مكافأتك اليومية بالفعل');
-      }
-
-      if (daysSinceLastClaim > 1) {
-        reward.streak = 1;
+      let rewardEntity: DailyReward;
+      if (!reward) {
+        rewardEntity = queryRunner.manager.create(DailyReward, {
+          user_id: userId,
+          streak: 0,
+          last_claim_day: 0,
+          last_claim_at: 0,
+          is_active: true,
+          reward_history: [],
+        });
+        rewardEntity = await queryRunner.manager.save(rewardEntity);
       } else {
-        reward.streak += 1;
+        rewardEntity = reward;
       }
-    } else {
-      reward.streak = 1;
+
+      const now = Date.now();
+
+      if (rewardEntity.last_claim_at > 0) {
+        const timeSinceLastClaim = now - rewardEntity.last_claim_at;
+        const daysSinceLastClaim = Math.floor(timeSinceLastClaim / this.MS_PER_DAY);
+
+        if (daysSinceLastClaim < 1) {
+          throw new BadRequestException('لقد حصلت على مكافأتك اليومية بالفعل');
+        }
+
+        if (daysSinceLastClaim > 1) {
+          rewardEntity.streak = 1;
+        } else {
+          rewardEntity.streak += 1;
+        }
+      } else {
+        rewardEntity.streak = 1;
+      }
+
+      if (rewardEntity.streak > 7) {
+        rewardEntity.streak = 1;
+      }
+
+      const dayConfig = this.REWARD_TABLE[rewardEntity.streak - 1];
+      const gold = dayConfig.gold;
+
+      await this.walletService.creditWithQueryRunner(
+        queryRunner,
+        userId,
+        gold,
+        TransactionSource.DAILY_REWARD,
+        `daily_reward:${userId}:${rewardEntity.streak}:${Math.floor(now / 1000)}`,
+        undefined,
+        { streak: rewardEntity.streak, day: rewardEntity.streak },
+      );
+
+      rewardEntity.last_claim_at = now;
+      rewardEntity.last_claim_day = rewardEntity.streak;
+
+      if (!rewardEntity.reward_history) {
+        rewardEntity.reward_history = [];
+      }
+      rewardEntity.reward_history.push({
+        day: rewardEntity.streak,
+        amount: gold,
+        claimedAt: now,
+      });
+
+      if (rewardEntity.reward_history.length > 30) {
+        rewardEntity.reward_history = rewardEntity.reward_history.slice(-30);
+      }
+
+      await queryRunner.manager.save(rewardEntity);
+      await queryRunner.commitTransaction();
+
+      await this.profileService.addXp(userId, 50);
+
+      this.logger.log(`User ${userId} claimed daily reward: ${gold} gold (streak: ${rewardEntity.streak})`);
+
+      return {
+        gold,
+        streak: rewardEntity.streak,
+        day: rewardEntity.streak,
+        message: `حصلت على ${gold} ذهب! (سلسلة: ${rewardEntity.streak}/7)`,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    if (reward.streak > 7) {
-      reward.streak = 1;
-    }
-
-    const dayConfig = this.REWARD_TABLE[reward.streak - 1];
-    const gold = dayConfig.gold;
-
-    await this.walletService.credit(
-      userId,
-      gold,
-      TransactionSource.DAILY_REWARD,
-      `daily_reward:${userId}:${now}`,
-      undefined,
-      { streak: reward.streak, day: reward.streak },
-    );
-
-    await this.profileService.addXp(userId, 50);
-
-    reward.last_claim_at = now;
-    reward.last_claim_day = reward.streak;
-
-    if (!reward.reward_history) {
-      reward.reward_history = [];
-    }
-    reward.reward_history.push({
-      day: reward.streak,
-      amount: gold,
-      claimedAt: now,
-    });
-
-    if (reward.reward_history.length > 30) {
-      reward.reward_history = reward.reward_history.slice(-30);
-    }
-
-    await this.dailyRewardRepo.save(reward);
-
-    this.logger.log(`User ${userId} claimed daily reward: ${gold} gold (streak: ${reward.streak})`);
-
-    return {
-      gold,
-      streak: reward.streak,
-      day: reward.streak,
-      message: `حصلت على ${gold} ذهب! (سلسلة: ${reward.streak}/7)`,
-    };
   }
 
   async getStatus(userId: string): Promise<{

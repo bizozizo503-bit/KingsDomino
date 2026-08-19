@@ -8,7 +8,7 @@
   WebSocketServer,
   WsException,
 } from '@nestjs/websockets';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { RoomsService } from '../rooms/rooms.service';
 import { JwtService } from '@nestjs/jwt';
@@ -18,9 +18,12 @@ import {
   PlayDominoEventDto,
   StartGameEventDto,
 } from './dto/game-events.dto';
+import { UsersService } from '../users/users.service';
+import { WsRateLimitGuard } from '../common/guards/ws-rate-limit.guard';
 
+@UseGuards(WsRateLimitGuard)
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: process.env.CORS_ORIGINS?.split(',').map(value => value.trim()).filter(Boolean) || true },
 })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -32,6 +35,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly roomsService: RoomsService,
     private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -47,6 +51,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const payload = this.jwtService.verify(token);
+      const user = await this.usersService.findById(payload.sub);
+      if (!user || !user.is_active) throw new Error('INACTIVE_USER');
       (client as any).userId = payload.sub;
       (client as any).username = payload.username;
     } catch {

@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum EventStatus {
@@ -68,6 +69,7 @@ export class GameEvent {
 }
 
 @Entity('player_event_progress')
+@Index(['event_id', 'user_id'], { unique: true })
 export class PlayerEventProgress {
   @PrimaryGeneratedColumn('uuid')
   id: string;

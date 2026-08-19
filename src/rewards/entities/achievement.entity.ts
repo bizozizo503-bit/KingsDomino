@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum AchievementCategory {
@@ -50,6 +51,7 @@ export class Achievement {
 }
 
 @Entity('player_achievements')
+@Index(['user_id', 'achievement_key'], { unique: true })
 export class PlayerAchievement {
   @PrimaryGeneratedColumn('uuid')
   id: string;

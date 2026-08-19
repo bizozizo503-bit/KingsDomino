@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum ShopItemType {
@@ -73,6 +74,7 @@ export class ShopItem {
 }
 
 @Entity('player_inventory')
+@Index(['user_id', 'item_key'], { unique: true })
 export class PlayerInventory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -97,6 +99,7 @@ export class PlayerInventory {
 }
 
 @Entity('player_boosts')
+@Index(['user_id'])
 export class PlayerBoost {
   @PrimaryGeneratedColumn('uuid')
   id: string;

@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import {
   Achievement,
   AchievementCategory,
@@ -24,6 +24,7 @@ export class AchievementService {
     private walletService: WalletService,
     private profileService: ProfileService,
     private notificationService: NotificationService,
+    private dataSource: DataSource,
   ) {}
 
   async seedAchievements(): Promise<void> {
@@ -113,44 +114,59 @@ export class AchievementService {
     xp: number;
     message: string;
   }> {
-    const playerAch = await this.playerAchievementRepo.findOne({
-      where: { user_id: userId, achievement_key: achievementKey },
-    });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (!playerAch) throw new NotFoundException('Achievement not found');
-    if (playerAch.unlocked_at === 0) throw new BadRequestException('Achievement not unlocked');
-    if (playerAch.is_claimed) throw new BadRequestException('Already claimed');
+    try {
+      const playerAch = await queryRunner.manager.findOne(PlayerAchievement, {
+        where: { user_id: userId, achievement_key: achievementKey },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    const achievement = await this.achievementRepo.findOne({
-      where: { key: achievementKey },
-    });
+      if (!playerAch) throw new NotFoundException('Achievement not found');
+      if (playerAch.unlocked_at === 0) throw new BadRequestException('Achievement not unlocked');
+      if (playerAch.is_claimed) throw new BadRequestException('Already claimed');
 
-    if (!achievement) throw new NotFoundException('Achievement definition not found');
+      const achievement = await this.achievementRepo.findOne({
+        where: { key: achievementKey },
+      });
 
-    if (achievement.gold_reward > 0) {
-      await this.walletService.credit(
-        userId,
-        achievement.gold_reward,
-        TransactionSource.GAME_REWARD,
-        `achievement:${achievementKey}:${userId}`,
-        undefined,
-        { achievement: achievementKey },
-      );
+      if (!achievement) throw new NotFoundException('Achievement definition not found');
+
+      if (achievement.gold_reward > 0) {
+        await this.walletService.creditWithQueryRunner(
+          queryRunner,
+          userId,
+          achievement.gold_reward,
+          TransactionSource.GAME_REWARD,
+          `achievement:${achievementKey}:${userId}`,
+          undefined,
+          { achievement: achievementKey },
+        );
+      }
+
+      playerAch.is_claimed = true;
+      playerAch.claimed_at = Date.now();
+      await queryRunner.manager.save(playerAch);
+
+      await queryRunner.commitTransaction();
+
+      if (achievement.xp_reward > 0) {
+        await this.profileService.addXp(userId, achievement.xp_reward);
+      }
+
+      return {
+        gold: achievement.gold_reward,
+        xp: achievement.xp_reward,
+        message: `حصلت على ${achievement.gold_reward} ذهب و ${achievement.xp_reward} XP!`,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    if (achievement.xp_reward > 0) {
-      await this.profileService.addXp(userId, achievement.xp_reward);
-    }
-
-    playerAch.is_claimed = true;
-    playerAch.claimed_at = Date.now();
-    await this.playerAchievementRepo.save(playerAch);
-
-    return {
-      gold: achievement.gold_reward,
-      xp: achievement.xp_reward,
-      message: `حصلت على ${achievement.gold_reward} ذهب و ${achievement.xp_reward} XP!`,
-    };
   }
 
   async getAllAchievements(): Promise<Achievement[]> {

@@ -3,19 +3,23 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
+import * as crypto from 'crypto';
 import { GameRegistry } from './core/game-registry.service';
 import { GameSessionService } from './core/game-session.service';
 import { MatchmakingService } from './core/matchmaking.service';
 import { LeaderboardService } from './core/leaderboard.service';
 import { AchievementService } from '../rewards/achievement.service';
 import { ProfileService } from '../social/profile.service';
+import { UsersService } from '../users/users.service';
+import { WsRateLimitGuard } from '../common/guards/ws-rate-limit.guard';
 import {
   JoinMatchmakingDto,
   LeaveMatchmakingDto,
@@ -24,17 +28,40 @@ import {
   ResignDto,
 } from './dto/games.dto';
 
+@UseGuards(WsRateLimitGuard)
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: process.env.CORS_ORIGINS?.split(',').map(value => value.trim()).filter(Boolean) || true },
   namespace: '/games',
 })
-export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger(GamesGateway.name);
   private clientUsers = new Map<string, { userId: string; username: string }>();
   private clientSessions = new Map<string, string>();
+  private userSockets = new Map<string, Set<string>>();
+
+  afterInit(): void {
+    this.matchmakingService.setMatchHandler(async (gameId, players) => {
+      const session = await this.sessionService.createSession(
+        gameId,
+        this.generateCode(),
+        players.map(player => player.playerId),
+        Object.fromEntries(players.map(player => [player.playerId, player.playerName])),
+      );
+      for (const player of players) {
+        for (const socketId of this.userSockets.get(player.playerId) || []) {
+          this.server.to(socketId).emit('matchFound', {
+            sessionId: session.id,
+            gameId: session.game_id,
+            roomCode: session.room_code,
+            players,
+          });
+        }
+      }
+    });
+  }
 
   constructor(
     private readonly jwtService: JwtService,
@@ -44,6 +71,7 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly leaderboardService: LeaderboardService,
     private readonly achievementService: AchievementService,
     private readonly profileService: ProfileService,
+    private readonly usersService: UsersService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -59,10 +87,14 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const payload = this.jwtService.verify(token);
+      const user = await this.usersService.findById(payload.sub);
+      if (!user || !user.is_active) throw new Error('INACTIVE_USER');
       this.clientUsers.set(client.id, {
         userId: payload.sub,
         username: payload.username,
       });
+      if (!this.userSockets.has(user.id)) this.userSockets.set(user.id, new Set());
+      this.userSockets.get(user.id)!.add(client.id);
       this.logger.log(`Client connected: ${client.id} (${payload.username})`);
     } catch {
       client.emit('error', { message: 'Invalid token' });
@@ -79,6 +111,11 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.clientUsers.delete(client.id);
     this.clientSessions.delete(client.id);
+    if (user) {
+      const sockets = this.userSockets.get(user.userId);
+      sockets?.delete(client.id);
+      if (sockets?.size === 0) this.userSockets.delete(user.userId);
+    }
   }
 
   @SubscribeMessage('getGames')
@@ -155,6 +192,9 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
+      if (!data.playerIds.includes(user.userId)) {
+        throw new Error('SESSION_CREATOR_MUST_BE_PLAYER');
+      }
       const session = await this.sessionService.createSession(
         data.gameId,
         data.roomCode || this.generateCode(),
@@ -181,17 +221,24 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     data: { sessionId: string },
     @ConnectedSocket() client: Socket,
   ) {
+    const user = this.clientUsers.get(client.id);
+    if (!user) {
+      client.emit('error', { message: 'Not authenticated' });
+      return;
+    }
     try {
-      const active = await this.sessionService.startSession(data.sessionId);
+      const active = await this.sessionService.startSession(data.sessionId, user.userId);
 
       const playerIds = active.session.player_ids;
       for (const playerId of playerIds) {
         const stateForPlayer = active.gameInstance.getStateForPlayer(playerId);
-        this.server.to(playerId).emit('gameStarted', {
-          sessionId: active.session.id,
-          gameId: active.session.game_id,
-          state: stateForPlayer,
-        });
+        for (const socketId of this.userSockets.get(playerId) || []) {
+          this.server.to(socketId).emit('gameStarted', {
+            sessionId: active.session.id,
+            gameId: active.session.game_id,
+            state: stateForPlayer,
+          });
+        }
       }
 
       client.emit('sessionStarted', { sessionId: active.session.id });
@@ -233,7 +280,7 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       if (result.gameOver && result.result) {
-        const activeSession = this.sessionService.getActiveSession(data.sessionId);
+        const activeSession = result.activeSession;
         if (!activeSession) return;
 
         for (const playerId of activeSession.session.player_ids) {
@@ -283,6 +330,8 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
             reason: result.result.reason,
           });
         }
+
+        this.sessionService.removeActiveSession(data.sessionId);
       }
     } catch (error) {
       client.emit('error', { message: error.message });
@@ -337,6 +386,6 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private generateCode(): string {
-    return Math.random().toString(16).substring(2, 8).toUpperCase();
+    return crypto.randomBytes(3).toString('hex').toUpperCase();
   }
 }

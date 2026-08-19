@@ -4,6 +4,7 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum SessionStatus {
@@ -13,6 +14,8 @@ export enum SessionStatus {
 }
 
 @Entity('game_sessions')
+@Index(['game_id'])
+@Index(['status'])
 export class GameSession {
   @PrimaryGeneratedColumn('uuid')
   id: string;

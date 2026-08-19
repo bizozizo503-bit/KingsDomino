@@ -51,6 +51,8 @@ import { GameEvent, PlayerEventProgress } from './events/entities/event.entity';
         database: configService.get<string>('DB_DATABASE', 'kingsdomino'),
         autoLoadEntities: true,
         synchronize: configService.get<string>('NODE_ENV') !== 'production',
+        migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
+        migrationsRun: configService.get<string>('NODE_ENV') === 'production',
       }),
     }),
 

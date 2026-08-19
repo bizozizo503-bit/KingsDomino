@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import {
   ShopItem,
   ShopItemType,
@@ -9,7 +9,7 @@ import {
   PlayerBoost,
 } from './entities/shop.entity';
 import { WalletService } from '../wallet/wallet.service';
-import { TransactionSource } from '../wallet/entities/wallet-transaction.entity';
+import { TransactionSource, WalletCurrency } from '../wallet/entities/wallet-transaction.entity';
 
 @Injectable()
 export class ShopService {
@@ -23,6 +23,7 @@ export class ShopService {
     @InjectRepository(PlayerBoost)
     private boostRepo: Repository<PlayerBoost>,
     private walletService: WalletService,
+    private dataSource: DataSource,
   ) {}
 
   async seedShop(): Promise<void> {
@@ -87,82 +88,103 @@ export class ShopService {
     item: ShopItem;
     message: string;
   }> {
-    const item = await this.getItem(itemKey);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (!item.is_active) throw new BadRequestException('Item not available');
+    try {
+      const item = await queryRunner.manager.findOne(ShopItem, {
+        where: { key: itemKey },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!item) throw new NotFoundException('Item not found');
 
-    if (item.expires_at && item.expires_at < Date.now()) {
-      throw new BadRequestException('Item expired');
+      if (!item.is_active) throw new BadRequestException('Item not available');
+
+      if (item.expires_at && item.expires_at < Date.now()) {
+        throw new BadRequestException('Item expired');
+      }
+
+      if (item.stock !== null && item.stock <= 0) {
+        throw new BadRequestException('Item out of stock');
+      }
+
+      const existingInv = await queryRunner.manager.findOne(PlayerInventory, {
+        where: { user_id: userId, item_key: itemKey },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (existingInv && item.item_type !== ShopItemType.BOOST && item.item_type !== ShopItemType.ENERGY) {
+        throw new ConflictException('Already owned');
+      }
+
+      if (item.currency === ShopCurrency.GOLD) {
+        const idempotencyKey = `shop:${itemKey}:${userId}:${Math.floor(Date.now() / 1000)}`;
+        await this.walletService.debitWithQueryRunner(
+          queryRunner,
+          userId,
+          item.price,
+          TransactionSource.PURCHASE,
+          idempotencyKey,
+          item.id,
+          { item: itemKey },
+          WalletCurrency.GOLD,
+        );
+      } else if (item.currency === ShopCurrency.GEMS) {
+        const idempotencyKey = `shop_gems:${itemKey}:${userId}:${Math.floor(Date.now() / 1000)}`;
+        await this.walletService.debitWithQueryRunner(
+          queryRunner,
+          userId,
+          item.price,
+          TransactionSource.PURCHASE,
+          idempotencyKey,
+          item.id,
+          { item: itemKey, currency: 'gems' },
+          WalletCurrency.GEMS,
+        );
+      } else if (item.currency === ShopCurrency.REAL_MONEY) {
+        throw new BadRequestException('In-app purchase not yet implemented');
+      }
+
+      if (item.item_type === ShopItemType.BOOST && item.metadata) {
+        await queryRunner.manager.save(queryRunner.manager.create(PlayerBoost, {
+          user_id: userId,
+          boost_type: item.metadata.boostType || 'xp',
+          multiplier: item.metadata.multiplier || 2,
+          expires_at: Date.now() + (item.metadata.durationMs || 3600000),
+        }));
+      }
+
+      if (item.item_type === ShopItemType.ENERGY && item.metadata) {
+        this.logger.log(`User ${userId} purchased energy: ${item.metadata.amount}`);
+      } else {
+        await queryRunner.manager.save(queryRunner.manager.create(PlayerInventory, {
+          user_id: userId,
+          item_key: itemKey,
+          is_equipped: false,
+          purchased_at: Date.now(),
+          quantity: 1,
+        }));
+      }
+
+      if (item.stock !== null) {
+        item.stock -= 1;
+        await queryRunner.manager.save(item);
+      }
+
+      await queryRunner.commitTransaction();
+
+      this.logger.log(`User ${userId} purchased ${itemKey} for ${item.price} ${item.currency}`);
+
+      return {
+        item,
+        message: `تم شراء ${item.name} بنجاح!`,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    if (item.stock !== null && item.stock <= 0) {
-      throw new BadRequestException('Item out of stock');
-    }
-
-    if (item.currency === ShopCurrency.GOLD) {
-      const idempotencyKey = `shop:${itemKey}:${userId}:${Date.now()}`;
-      await this.walletService.debit(
-        userId,
-        item.price,
-        TransactionSource.PURCHASE,
-        idempotencyKey,
-        item.id,
-        { item: itemKey },
-      );
-    } else if (item.currency === ShopCurrency.GEMS) {
-      const idempotencyKey = `shop_gems:${itemKey}:${userId}:${Date.now()}`;
-      await this.walletService.debit(
-        userId,
-        item.price,
-        TransactionSource.PURCHASE,
-        idempotencyKey,
-        item.id,
-        { item: itemKey, currency: 'gems' },
-      );
-    } else if (item.currency === ShopCurrency.REAL_MONEY) {
-      throw new BadRequestException('In-app purchase not yet implemented');
-    }
-
-    if (item.item_type === ShopItemType.BOOST && item.metadata) {
-      await this.boostRepo.save(this.boostRepo.create({
-        user_id: userId,
-        boost_type: item.metadata.boostType || 'xp',
-        multiplier: item.metadata.multiplier || 2,
-        expires_at: Date.now() + (item.metadata.durationMs || 3600000),
-      }));
-    }
-
-    const existingInv = await this.inventoryRepo.findOne({
-      where: { user_id: userId, item_key: itemKey },
-    });
-
-    if (existingInv && item.item_type !== ShopItemType.BOOST && item.item_type !== ShopItemType.ENERGY) {
-      throw new ConflictException('Already owned');
-    }
-
-    if (item.item_type === ShopItemType.ENERGY && item.metadata) {
-      this.logger.log(`User ${userId} purchased energy: ${item.metadata.amount}`);
-    } else {
-      await this.inventoryRepo.save(this.inventoryRepo.create({
-        user_id: userId,
-        item_key: itemKey,
-        is_equipped: false,
-        purchased_at: Date.now(),
-        quantity: 1,
-      }));
-    }
-
-    if (item.stock !== null) {
-      item.stock -= 1;
-      await this.shopItemRepo.save(item);
-    }
-
-    this.logger.log(`User ${userId} purchased ${itemKey} for ${item.price} ${item.currency}`);
-
-    return {
-      item,
-      message: `تم شراء ${item.name} بنجاح!`,
-    };
   }
 
   async getInventory(userId: string): Promise<PlayerInventory[]> {

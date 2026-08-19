@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum LeaderboardPeriod {
@@ -13,6 +14,7 @@ export enum LeaderboardPeriod {
 }
 
 @Entity('leaderboards')
+@Index(['game_id', 'player_id', 'period'], { unique: true })
 export class LeaderboardEntry {
   @PrimaryGeneratedColumn('uuid')
   id: string;

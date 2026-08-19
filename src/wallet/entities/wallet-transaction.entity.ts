@@ -13,6 +13,11 @@ export enum TransactionType {
   DEBIT = 'DEBIT',
 }
 
+export enum WalletCurrency {
+  GOLD = 'GOLD',
+  GEMS = 'GEMS',
+}
+
 export enum TransactionSource {
   DAILY_REWARD = 'DAILY_REWARD',
   COUPON = 'COUPON',
@@ -38,6 +43,9 @@ export class WalletTransaction {
 
   @Column({ type: 'enum', enum: TransactionType })
   type: TransactionType;
+
+  @Column({ type: 'enum', enum: WalletCurrency, default: WalletCurrency.GOLD })
+  currency: WalletCurrency;
 
   @Column({ type: 'enum', enum: TransactionSource })
   source: TransactionSource;

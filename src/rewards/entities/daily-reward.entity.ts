@@ -3,9 +3,11 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 @Entity('daily_rewards')
+@Index(['user_id'], { unique: true })
 export class DailyReward {
   @PrimaryGeneratedColumn('uuid')
   id: string;

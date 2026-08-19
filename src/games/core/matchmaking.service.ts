@@ -14,12 +14,14 @@ export interface MatchResult {
   playerName: string;
   rating: number;
 }
+export type MatchHandler = (gameId: string, players: MatchResult[]) => Promise<void>;
 
 @Injectable()
 export class MatchmakingService {
   private readonly logger = new Logger(MatchmakingService.name);
   private queues = new Map<string, MatchRequest[]>();
   private matchmakingTimer: ReturnType<typeof setInterval> | null = null;
+  private matchHandler?: MatchHandler;
 
   private readonly MATCH_INTERVAL_MS = 3000;
   private readonly MAX_WAIT_MS = 30000;
@@ -36,6 +38,10 @@ export class MatchmakingService {
     if (this.matchmakingTimer) {
       clearInterval(this.matchmakingTimer);
     }
+  }
+
+  setMatchHandler(handler: MatchHandler): void {
+    this.matchHandler = handler;
   }
 
   joinQueue(request: MatchRequest): { position: number; estimatedWaitMs: number } {
@@ -148,5 +154,8 @@ export class MatchmakingService {
     }));
 
     this.logger.log(`Match ready: ${JSON.stringify(matchResult)}`);
+    void this.matchHandler?.(gameId, matchResult).catch(error =>
+      this.logger.error(`Failed to create matched session: ${error?.message || error}`),
+    );
   }
 }

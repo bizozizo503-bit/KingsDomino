@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import {
   Tournament,
   TournamentStatus,
@@ -23,6 +23,7 @@ export class TournamentService {
     @InjectRepository(TournamentRound)
     private roundRepo: Repository<TournamentRound>,
     private walletService: WalletService,
+    private dataSource: DataSource,
   ) {}
 
   async createTournament(data: {
@@ -372,7 +373,7 @@ export class TournamentService {
         participants[0].user_id,
         rewards.first.gold || 0,
         TransactionSource.TOURNAMENT_WIN,
-        `tournament_1st:${tournament.id}:${Date.now()}`,
+        `tournament:${tournament.id}:1st:${participants[0].user_id}`,
         tournament.id,
         { tournament: tournament.id, rank: 1 },
       );
@@ -383,7 +384,7 @@ export class TournamentService {
         participants[1].user_id,
         rewards.second.gold || 0,
         TransactionSource.TOURNAMENT_WIN,
-        `tournament_2nd:${tournament.id}:${Date.now()}`,
+        `tournament:${tournament.id}:2nd:${participants[1].user_id}`,
         tournament.id,
         { tournament: tournament.id, rank: 2 },
       );
@@ -394,7 +395,7 @@ export class TournamentService {
         participants[2].user_id,
         rewards.third.gold || 0,
         TransactionSource.TOURNAMENT_WIN,
-        `tournament_3rd:${tournament.id}:${Date.now()}`,
+        `tournament:${tournament.id}:3rd:${participants[2].user_id}`,
         tournament.id,
         { tournament: tournament.id, rank: 3 },
       );

@@ -5,6 +5,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { GameGateway } from './game.gateway';
 import { DominoService } from './domino.service';
 import { RoomsModule } from '../rooms/rooms.module';
+import { UsersModule } from '../users/users.module';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { RoomsModule } from '../rooms/rooms.module';
       }),
     }),
     forwardRef(() => RoomsModule),
+    UsersModule,
+    CommonModule,
   ],
   providers: [GameGateway, DominoService],
   exports: [DominoService],

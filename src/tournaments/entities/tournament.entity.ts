@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum TournamentStatus {
@@ -80,6 +81,7 @@ export class Tournament {
 }
 
 @Entity('tournament_participants')
+@Index(['tournament_id', 'user_id'], { unique: true })
 export class TournamentParticipant {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -122,6 +124,7 @@ export class TournamentParticipant {
 }
 
 @Entity('tournament_rounds')
+@Index(['tournament_id'])
 export class TournamentRound {
   @PrimaryGeneratedColumn('uuid')
   id: string;

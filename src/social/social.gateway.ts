@@ -7,7 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
@@ -15,9 +15,12 @@ import { FriendsService } from './friends.service';
 import { NotificationService } from './notification.service';
 import { ProfileService } from './profile.service';
 import { ChatRoomType } from './entities/chat-message.entity';
+import { UsersService } from '../users/users.service';
+import { WsRateLimitGuard } from '../common/guards/ws-rate-limit.guard';
 
+@UseGuards(WsRateLimitGuard)
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: process.env.CORS_ORIGINS?.split(',').map(value => value.trim()).filter(Boolean) || true },
   namespace: '/social',
 })
 export class SocialGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -34,6 +37,7 @@ export class SocialGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly friendsService: FriendsService,
     private readonly notificationService: NotificationService,
     private readonly profileService: ProfileService,
+    private readonly usersService: UsersService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -50,6 +54,8 @@ export class SocialGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const payload = this.jwtService.verify(token);
       const userId = payload.sub;
+      const user = await this.usersService.findById(userId);
+      if (!user || !user.is_active) throw new Error('INACTIVE_USER');
 
       this.clientUsers.set(client.id, { userId, username: payload.username });
 

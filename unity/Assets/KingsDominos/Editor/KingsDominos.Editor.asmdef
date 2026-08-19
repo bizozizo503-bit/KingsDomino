@@ -1,0 +1,17 @@
+{
+    "name": "KingsDominos.Editor",
+    "rootNamespace": "KingsDominos.Editor",
+    "references": [
+        "KingsDominos",
+        "Unity.TextMeshPro"
+    ],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

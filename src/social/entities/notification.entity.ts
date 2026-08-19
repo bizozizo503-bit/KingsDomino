@@ -12,6 +12,7 @@ export enum NotificationType {
   GAME_RESULT = 'game_result',
   DAILY_REWARD = 'daily_reward',
   ACHIEVEMENT = 'achievement',
+  EVENT_COMPLETED = 'event_completed',
   SYSTEM = 'system',
 }
 

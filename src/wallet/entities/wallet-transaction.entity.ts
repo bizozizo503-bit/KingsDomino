@@ -20,6 +20,8 @@ export enum TransactionSource {
   ADMIN_ADJUST = 'ADMIN_ADJUST',
   PURCHASE = 'PURCHASE',
   INITIAL = 'INITIAL',
+  TOURNAMENT_WIN = 'TOURNAMENT_WIN',
+  OTHER = 'OTHER',
 }
 
 @Entity('wallet_transactions')

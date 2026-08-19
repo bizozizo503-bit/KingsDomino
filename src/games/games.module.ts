@@ -10,6 +10,8 @@ import { LeaderboardService } from './core/leaderboard.service';
 import { MatchmakingService } from './core/matchmaking.service';
 import { GamesGateway } from './games.gateway';
 import { GamesController } from './games.controller';
+import { RewardsModule } from '../rewards/rewards.module';
+import { SocialModule } from '../social/social.module';
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { GamesController } from './games.controller';
         secret: config.get<string>('JWT_SECRET'),
       }),
     }),
+    forwardRef(() => RewardsModule),
+    SocialModule,
   ],
   controllers: [GamesController],
   providers: [

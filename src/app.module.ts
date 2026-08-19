@@ -14,6 +14,9 @@ import { RoomsModule } from './rooms/rooms.module';
 import { GameModule } from './game/game.module';
 import { GamesModule } from './games/games.module';
 import { SocialModule } from './social/social.module';
+import { RewardsModule } from './rewards/rewards.module';
+import { TournamentsModule } from './tournaments/tournaments.module';
+import { EventsModule } from './events/events.module';
 
 import { User } from './users/entities/user.entity';
 import { Wallet } from './wallet/entities/wallet.entity';
@@ -26,6 +29,11 @@ import { PlayerProfile } from './social/entities/player-profile.entity';
 import { Friendship } from './social/entities/friendship.entity';
 import { ChatMessage } from './social/entities/chat-message.entity';
 import { Notification } from './social/entities/notification.entity';
+import { DailyReward } from './rewards/entities/daily-reward.entity';
+import { Achievement, PlayerAchievement } from './rewards/entities/achievement.entity';
+import { ShopItem, PlayerInventory, PlayerBoost } from './rewards/entities/shop.entity';
+import { Tournament, TournamentParticipant, TournamentRound } from './tournaments/entities/tournament.entity';
+import { GameEvent, PlayerEventProgress } from './events/entities/event.entity';
 
 @Module({
   imports: [
@@ -64,6 +72,9 @@ import { Notification } from './social/entities/notification.entity';
     GameModule,
     GamesModule,
     SocialModule,
+    RewardsModule,
+    TournamentsModule,
+    EventsModule,
   ],
   providers: [
     {

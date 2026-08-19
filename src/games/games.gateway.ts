@@ -14,6 +14,8 @@ import { GameRegistry } from './core/game-registry.service';
 import { GameSessionService } from './core/game-session.service';
 import { MatchmakingService } from './core/matchmaking.service';
 import { LeaderboardService } from './core/leaderboard.service';
+import { AchievementService } from '../rewards/achievement.service';
+import { ProfileService } from '../social/profile.service';
 import {
   JoinMatchmakingDto,
   LeaveMatchmakingDto,
@@ -40,6 +42,8 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly sessionService: GameSessionService,
     private readonly matchmakingService: MatchmakingService,
     private readonly leaderboardService: LeaderboardService,
+    private readonly achievementService: AchievementService,
+    private readonly profileService: ProfileService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -229,9 +233,48 @@ export class GamesGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       if (result.gameOver && result.result) {
-        const activeSession = await this.sessionService.getActiveSession(data.sessionId);
+        const activeSession = this.sessionService.getActiveSession(data.sessionId);
+        if (!activeSession) return;
 
-        for (const [playerId, rewards] of Object.entries(result.result.rewards as any)) {
+        for (const playerId of activeSession.session.player_ids) {
+          const won = result.result.winner === playerId;
+
+          await this.leaderboardService.recordGameResult(
+            activeSession.session.game_id,
+            playerId,
+            won,
+            won ? 100 : 10,
+          );
+
+          await this.profileService.recordGameResult(
+            playerId,
+            won,
+            won ? 100 : 10,
+          );
+
+          const profile = await this.profileService.getOrCreateProfile(playerId, '');
+          await this.achievementService.checkAndUpdateProgress(
+            playerId,
+            'games_played',
+            profile.games_played,
+          );
+          await this.achievementService.checkAndUpdateProgress(
+            playerId,
+            'games_won',
+            profile.games_won,
+          );
+          await this.achievementService.checkAndUpdateProgress(
+            playerId,
+            'win_streak',
+            profile.current_win_streak,
+          );
+          await this.achievementService.checkAndUpdateProgress(
+            playerId,
+            'level',
+            profile.level,
+          );
+
+          const rewards = (result.result.rewards as any)?.[playerId] || {};
           this.server.to(playerId).emit('gameOver', {
             sessionId: data.sessionId,
             winner: result.result.winner,

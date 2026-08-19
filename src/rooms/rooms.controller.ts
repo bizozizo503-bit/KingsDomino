@@ -10,6 +10,10 @@
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { RoomsService } from './rooms.service';
+import { CreateRoomDto } from './dto/create-room.dto';
+import { JoinRoomDto } from './dto/join-room.dto';
+import { RoomCodeDto } from './dto/room-code.dto';
+import { PlayDominoDto } from './dto/play-domino.dto';
 
 @Controller('rooms')
 @UseGuards(AuthGuard('jwt'))
@@ -19,41 +23,45 @@ export class RoomsController {
   @Post()
   create(
     @Req() req: any,
-    @Body() body: { name?: string; players?: number },
+    @Body() body: CreateRoomDto,
   ) {
-    return this.roomsService.create({
+    const room = this.roomsService.create({
       name: body.name || 'ملوك الدومينو',
-      players: Number(body.players) || 4,
+      players: body.players || 4,
       host: req.user.id,
       status: 'waiting',
     });
+    return this.roomsService.toPublicRoom(room);
   }
 
   @Get()
   findAll() {
-    return this.roomsService.findAll();
+    return this.roomsService.findAll().map((room) => this.roomsService.toPublicRoom(room));
   }
 
   @Get(':code')
-  findOne(@Param('code') code: string) {
-    return this.roomsService.findByCode(code);
+  findOne(@Param() params: RoomCodeDto) {
+    const room = this.roomsService.findByCode(params.code);
+    return room ? this.roomsService.toPublicRoom(room) : undefined;
   }
 
   @Post(':code/join')
   join(
-    @Param('code') code: string,
+    @Param() params: RoomCodeDto,
     @Req() req: any,
-    @Body() body: { name?: string },
+    @Body() body: JoinRoomDto,
   ) {
     const playerId = String(req.user.id);
     const name = body.name || req.user.username;
-    return this.roomsService.joinRoom(code, playerId, name);
+    const room = this.roomsService.joinRoom(params.code, playerId, name);
+    return this.roomsService.toPublicRoom(room);
   }
 
   @Post(':code/start')
-  start(@Param('code') code: string, @Req() req: any) {
+  start(@Param() params: RoomCodeDto, @Req() req: any) {
     try {
-      return this.roomsService.startGame(code, req.user.id);
+      const room = this.roomsService.startGame(params.code, req.user.id);
+      return this.roomsService.toPublicRoom(room);
     } catch (error) {
       if (error?.message === 'NOT_HOST') {
         throw new ForbiddenException('فقط صاحب الغرفة يمكنه بدء اللعبة');
@@ -64,14 +72,18 @@ export class RoomsController {
 
   @Post(':code/play')
   play(
-    @Param('code') code: string,
+    @Param() params: RoomCodeDto,
     @Req() req: any,
-    @Body() body: { tileIndex?: number },
+    @Body() body: PlayDominoDto,
   ) {
-    return this.roomsService.playDomino(
-      code,
+    const result = this.roomsService.playDomino(
+      params.code,
       String(req.user.id),
-      Number(body.tileIndex),
+      body.tileIndex,
     );
+    return {
+      ...result,
+      room: this.roomsService.toPublicRoom(result.room),
+    };
   }
 }

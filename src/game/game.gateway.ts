@@ -8,11 +8,16 @@
   WebSocketServer,
   WsException,
 } from '@nestjs/websockets';
-import { UseGuards } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { RoomsService } from '../rooms/rooms.service';
-import { WsJwtGuard } from '../common/guards/ws-jwt.guard';
 import { JwtService } from '@nestjs/jwt';
+import {
+  ChatEventDto,
+  JoinRoomEventDto,
+  PlayDominoEventDto,
+  StartGameEventDto,
+} from './dto/game-events.dto';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -65,8 +70,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('joinRoom')
   handleJoin(
-    @MessageBody()
-    data: { roomCode: string; name?: string },
+    @MessageBody(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
+    data: JoinRoomEventDto,
     @ConnectedSocket() client: Socket,
   ) {
     const userId = (client as any).userId as string;
@@ -92,7 +97,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       this.clientRooms.get(client.id)!.add(room.code);
 
-      this.server.to(room.code).emit('roomUpdated', this.publicRoom(room));
+      this.server.to(room.code).emit('roomUpdated', this.roomsService.toPublicRoom(room));
     } catch (error) {
       client.emit('gameError', {
         message: this.errorMessage(error),
@@ -102,7 +107,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('startGame')
   handleStart(
-    @MessageBody() data: { roomCode: string },
+  @MessageBody(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true })) data: StartGameEventDto,
     @ConnectedSocket() client: Socket,
   ) {
     const userId = (client as any).userId as string;
@@ -139,7 +144,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
 
-      this.server.to(startedRoom.code).emit('roomUpdated', this.publicRoom(startedRoom));
+      this.server.to(startedRoom.code).emit('roomUpdated', this.roomsService.toPublicRoom(startedRoom));
     } catch (error) {
       this.server.to(data.roomCode).emit('gameError', {
         message: this.errorMessage(error),
@@ -149,8 +154,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('playDomino')
   handlePlay(
-    @MessageBody()
-    data: { roomCode: string; tileIndex: number },
+    @MessageBody(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
+    data: PlayDominoEventDto,
     @ConnectedSocket() client: Socket,
   ) {
     const userId = (client as any).userId as string;
@@ -164,7 +169,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const result = this.roomsService.playDomino(
         data.roomCode,
         userId,
-        Number(data.tileIndex),
+        data.tileIndex,
       );
 
       for (const playerId of result.room.players) {
@@ -174,6 +179,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           board: result.room.gameState.board,
           currentPlayer: result.room.gameState.currentPlayer,
           winner: result.winner,
+          blocked: result.blocked,
+          skippedPlayers: result.skippedPlayers,
           myHandCount: hand.length,
           handsCount: Object.fromEntries(
             Object.entries(result.room.gameState.hands).map(
@@ -191,8 +198,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('chat')
   handleChat(
-    @MessageBody()
-    data: { roomCode: string; message: string },
+    @MessageBody(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
+    data: ChatEventDto,
     @ConnectedSocket() client: Socket,
   ) {
     const userId = (client as any).userId as string;
@@ -215,21 +222,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       name: username,
       message: trimmed,
     });
-  }
-
-  private publicRoom(room: any) {
-    return {
-      code: room.code,
-      name: room.name,
-      maxPlayers: room.maxPlayers,
-      host: room.host,
-      status: room.status,
-      players: room.players,
-      playerNames: room.playerNames,
-      started: room.started,
-      currentPlayer: room.gameState.currentPlayer,
-      board: room.gameState.board,
-    };
   }
 
   private errorMessage(error: any) {

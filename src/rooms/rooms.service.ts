@@ -1,6 +1,8 @@
 ﻿import { BadRequestException, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { Domino } from '../game/domino.interface';
 import { DominoService } from '../game/domino.service';
+import { PublicRoomDto } from './dto/room-response.dto';
 
 export interface GameState {
   players: string[];
@@ -9,6 +11,7 @@ export interface GameState {
   currentPlayer: string;
   board: any[];
   hands: Record<string, any[]>;
+  finishReason?: 'normal' | 'blocked';
 }
 
 export interface Room {
@@ -99,6 +102,25 @@ export class RoomsService implements OnModuleDestroy {
 
   findByCode(code: string): Room | undefined {
     return this.rooms.get(code.toUpperCase());
+  }
+
+  toPublicRoom(room: Room): PublicRoomDto {
+    return {
+      code: room.code,
+      name: room.name,
+      maxPlayers: room.maxPlayers,
+      host: room.host,
+      status: room.status,
+      players: [...room.players],
+      playerNames: { ...room.playerNames },
+      started: room.started,
+      gameState: {
+        started: room.gameState.started,
+        currentPlayer: room.gameState.currentPlayer,
+        board: room.gameState.board.map((tile) => ({ ...tile })),
+        finishReason: room.gameState.finishReason,
+      },
+    };
   }
 
   joinRoom(code: string, playerId: string, name: string): Room {
@@ -199,28 +221,54 @@ export class RoomsService implements OnModuleDestroy {
       throw new Error('INVALID_TILE');
     }
 
-    if (!this.isValidPlacement(room.gameState.board, tile)) {
+    const side = this.getPlacementSide(room.gameState.board, tile);
+    if (!side) {
       throw new BadRequestException('INVALID_PLACEMENT');
     }
 
-    hand.splice(tileIndex, 1);
-    room.gameState.board.push(tile);
+    const orientedTile = this.orientTile(tile, side, room.gameState.board);
 
-    const currentIndex = room.players.indexOf(playerId);
-    const nextIndex = (currentIndex + 1) % room.players.length;
-    room.gameState.currentPlayer = room.players[nextIndex];
-    room.lastActivity = Date.now();
+    hand.splice(tileIndex, 1);
+
+    if (side === 'left') {
+      room.gameState.board.unshift(orientedTile);
+    } else {
+      room.gameState.board.push(orientedTile);
+    }
 
     if (hand.length === 0) {
       room.status = 'finished';
       room.started = false;
       room.gameState.started = false;
+      room.gameState.finishReason = 'normal';
+      room.lastActivity = Date.now();
+
+      return {
+        room,
+        tile: orientedTile,
+        winner: playerId,
+        skippedPlayers: [],
+        blocked: false,
+      };
     }
+
+    const { skippedPlayers, blocked } = this.advanceTurn(room, playerId);
+
+    if (blocked) {
+      room.status = 'finished';
+      room.started = false;
+      room.gameState.started = false;
+      room.gameState.finishReason = 'blocked';
+    }
+
+    room.lastActivity = Date.now();
 
     return {
       room,
-      tile,
-      winner: hand.length === 0 ? playerId : null,
+      tile: orientedTile,
+      winner: null,
+      skippedPlayers,
+      blocked,
     };
   }
 
@@ -284,23 +332,66 @@ export class RoomsService implements OnModuleDestroy {
     room.lastActivity = Date.now();
   }
 
-  private isValidPlacement(board: any[], tile: { left: number; right: number }): boolean {
-    if (board.length === 0) {
-      return true;
-    }
+  private getPlacementSide(board: Domino[], tile: Domino): 'left' | 'right' | null {
+    if (board.length === 0) return 'right';
 
-    const rightEnd = board[board.length - 1].right;
     const leftEnd = board[0].left;
+    const rightEnd = board[board.length - 1].right;
 
-    if (tile.left === rightEnd || tile.right === rightEnd) {
-      return true;
+    const matchesRight = tile.left === rightEnd || tile.right === rightEnd;
+    const matchesLeft = tile.left === leftEnd || tile.right === leftEnd;
+
+    if (matchesRight) return 'right';
+    if (matchesLeft) return 'left';
+    return null;
+  }
+
+  private orientTile(tile: Domino, side: 'left' | 'right', board: Domino[]): Domino {
+    if (board.length === 0) return tile;
+
+    if (side === 'right') {
+      const rightEnd = board[board.length - 1].right;
+      if (tile.left === rightEnd) return tile;
+      return this.dominoService.flip(tile);
     }
 
-    if (tile.left === leftEnd || tile.right === leftEnd) {
-      return true;
-    }
+    const leftEnd = board[0].left;
+    if (tile.right === leftEnd) return tile;
+    return this.dominoService.flip(tile);
+  }
 
-    return false;
+  private advanceTurn(
+    room: Room,
+    justPlayedId: string,
+  ): { skippedPlayers: string[]; blocked: boolean } {
+    const skippedPlayers: string[] = [];
+    const board = room.gameState.board;
+    const leftEnd = board[0].left;
+    const rightEnd = board[board.length - 1].right;
+
+    let nextIndex =
+      (room.players.indexOf(justPlayedId) + 1) % room.players.length;
+    const startIndex = nextIndex;
+
+    while (true) {
+      const nextPlayer = room.players[nextIndex];
+      const hand = room.gameState.hands[nextPlayer] || [];
+
+      if (
+        hand.length > 0 &&
+        this.dominoService.hasPlayableTile(hand, leftEnd, rightEnd)
+      ) {
+        room.gameState.currentPlayer = nextPlayer;
+        return { skippedPlayers, blocked: false };
+      }
+
+      skippedPlayers.push(nextPlayer);
+      nextIndex = (nextIndex + 1) % room.players.length;
+
+      if (nextIndex === startIndex) {
+        return { skippedPlayers, blocked: true };
+      }
+    }
   }
 
   private generateUniqueCode(): string {

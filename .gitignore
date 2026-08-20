@@ -14,6 +14,7 @@ lerna-debug.log*
 
 # OS
 .DS_Store
+Thumbs.db
 
 # Tests
 /coverage
@@ -55,9 +56,53 @@ pids
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
+# Environment
 .env
 node_modules/
 dist/
 
-# Unity project (kept separate from backend)
+# ============================================================
+# Unity project (unity/)
+# Cache/build artifacts must NOT be tracked. Keep Assets/,
+# Packages/ (manifest.json) and ProjectSettings/.
+# ============================================================
+unity/Library/
+unity/Temp/
+unity/Logs/
+unity/UserSettings/
+unity/.vs/
+unity/obj/
+unity/Build/
+unity/Builds/
+unity/Projects/
+unity/UnityGeneratedProject/
+unity/export/
+unity/*.csproj
+unity/*.sln
+unity/Assembly-CSharp*.csproj
+unity/*.user
+unity/*.userprefs
+unity/*.pidb
+unity/*.booproj
+unity/*.svd
+unity/*.tmp
+unity/*.csc
+unity/*.slnx
+unity/vsconfig
+
+# ============================================================
+# Mobile (Expo) project
+# Keep src/, app.json, package.json, eas.json, assets/, tsconfig.json
+# ============================================================
+mobile/node_modules/
+mobile/.expo/
+mobile/.expo-shared/
+mobile/web-build/
+mobile/web/
+mobile/dist/
+mobile/.vscode/*
+mobile/.claude/
+mobile/*.log
+
+# Unity root-level misconfiguration guard (deprecated path)
 /KingsDomino/

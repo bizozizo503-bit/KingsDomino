@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.Networking;
+using KingsDominos.Core;
 
 namespace KingsDominos.Network.API
 {
@@ -10,7 +11,9 @@ namespace KingsDominos.Network.API
         public static ApiClient Instance { get; private set; }
 
         [Header("API Settings")]
-        public string baseUrl = "https://your-server-url.com/api";
+        public string baseUrl = "";
+
+        public string AuthToken { get; set; } = "";
 
         private void Awake()
         {
@@ -22,6 +25,12 @@ namespace KingsDominos.Network.API
             else
             {
                 Destroy(gameObject);
+            }
+
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                var config = GameConfig.Instance;
+                baseUrl = config != null ? config.apiBaseUrl : "http://localhost:3000/api";
             }
         }
 
@@ -115,6 +124,13 @@ namespace KingsDominos.Network.API
             request.downloadHandler =
                 new DownloadHandlerBuffer();
 
+            if (!string.IsNullOrEmpty(AuthToken))
+            {
+                request.SetRequestHeader(
+                    "Authorization",
+                    $"Bearer {AuthToken}"
+                );
+            }
 
             yield return request.SendWebRequest();
 

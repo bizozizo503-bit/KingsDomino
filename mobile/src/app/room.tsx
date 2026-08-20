@@ -1,27 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
 } from "react-native";
 import axios from "axios";
 import { useRouter } from "expo-router";
+import { API_URL } from "../lib/api";
+import { getStoredToken, getStoredUser } from "../lib/auth";
+import { connectSocket, getSocket, disconnectSocket } from "../lib/socket";
+import { setInitialGameState } from "../lib/game-store";
 
-const API = "http://192.168.1.2:3000";
-
-type RoomData = {
-  id: string;
+interface RoomData {
   code: string;
   host: string;
   players: string[];
-  started: boolean;
+  playerNames: Record<string, string>;
   maxPlayers: number;
-  createdAt: string;
-};
+  status: string;
+  started: boolean;
+}
 
-export default function Room() {
+export default function RoomScreen() {
   const router = useRouter();
 
   const [name, setName] = useState("");
@@ -30,54 +33,73 @@ export default function Room() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function openGame(roomData: RoomData, playerName: string) {
-    router.push({
-      pathname: "/game",
-      params: {
-        roomCode: String(roomData.code),
-        playerName: String(playerName || "Player"),
-      },
+  async function ensureAuth() {
+    const token = await getStoredToken();
+    const user = await getStoredUser();
+    if (!token || !user) {
+      router.replace("/auth");
+      return null;
+    }
+    return { token, user };
+  }
+
+  function connectAndJoin(roomCode: string, playerName: string) {
+    const socket = getSocket();
+    if (!socket) {
+      setMessage("تعذر الاتصال بالسيرفر");
+      return;
+    }
+
+    socket.emit("joinRoom", { roomCode, name: playerName });
+
+    socket.on("roomUpdated", (data: RoomData) => {
+      setRoom(data);
+    });
+
+    socket.on("gameStarted", (data) => {
+      setInitialGameState({
+        roomCode: data.roomCode,
+        hand: data.hand,
+        currentPlayer: data.currentPlayer,
+        board: data.board,
+        players: data.players,
+        playerNames: data.playerNames,
+      });
+      router.replace({
+        pathname: "/game",
+        params: { roomCode, playerName },
+      });
+    });
+
+    socket.on("gameError", (data) => {
+      setMessage(data?.message || "خطأ في الغرفة");
     });
   }
 
   async function createRoom() {
     try {
+      const auth = await ensureAuth();
+      if (!auth) return;
+
       setLoading(true);
       setMessage("جاري إنشاء الغرفة...");
 
-      const playerName = name.trim() || "Zizo";
+      const playerName = name.trim() || auth.user.username;
 
-      const res = await axios.post(`${API}/rooms`, {
-        name: playerName,
-        players: 4,
-      });
-
-      const serverRoom = res.data;
-
-      // لاعبين وهميين للاختبار
-      const testRoom: RoomData = {
-        ...serverRoom,
-        players: [
-          playerName,
-          "Ahmed",
-          "Mohamed",
-          "Soso",
-        ],
-        started: false,
-        maxPlayers: 4,
-      };
-
-      setRoom(testRoom);
-      setCode(testRoom.code);
-      setName(playerName);
-
-      setMessage("تم إنشاء الغرفة ✅ يوجد 4 لاعبين للاختبار");
-    } catch (error: any) {
-      console.log(
-        "CREATE ERROR",
-        error?.response?.data || error
+      const res = await axios.post(
+        `${API_URL}/api/rooms`,
+        { players: 2, name: playerName },
+        { headers: { Authorization: `Bearer ${auth.token}` } },
       );
 
+      const serverRoom: RoomData = res.data;
+      setCode(serverRoom.code);
+      setName(playerName);
+
+      connectAndJoin(serverRoom.code, playerName);
+      setMessage("تم إنشاء الغرفة، انتظر اللاعب الثاني...");
+    } catch (error: any) {
+      console.log("CREATE ERROR", error?.response?.data || error);
       setMessage("خطأ في إنشاء الغرفة أو الاتصال بالسيرفر");
     } finally {
       setLoading(false);
@@ -86,40 +108,32 @@ export default function Room() {
 
   async function joinRoom() {
     try {
-      setLoading(true);
-      setMessage("جاري الدخول...");
+      const auth = await ensureAuth();
+      if (!auth) return;
 
-      const playerName = name.trim() || "Player";
       const roomCode = code.trim().toLowerCase();
-
       if (!roomCode) {
         setMessage("اكتب كود الغرفة أولًا");
-        setLoading(false);
         return;
       }
 
-      const res = await axios.post(`${API}/rooms/join`, {
-        code: roomCode,
-        playerName,
-      });
+      setLoading(true);
+      setMessage("جاري الدخول...");
 
-      if (res.data.success) {
-        setRoom(res.data.room);
-        setMessage("تم الدخول للغرفة ✅");
-      } else {
-        setMessage(
-          res.data.message || "تعذر الدخول للغرفة"
-        );
-      }
-    } catch (error: any) {
-      console.log(
-        "JOIN ERROR",
-        error?.response?.data || error
+      const playerName = name.trim() || auth.user.username;
+
+      await axios.post(
+        `${API_URL}/api/rooms/${roomCode}/join`,
+        { name: playerName },
+        { headers: { Authorization: `Bearer ${auth.token}` } },
       );
 
+      connectAndJoin(roomCode, playerName);
+      setMessage("تم الدخول للغرفة، انتظر بدء اللعبة...");
+    } catch (error: any) {
+      console.log("JOIN ERROR", error?.response?.data || error);
       setMessage(
-        error?.response?.data?.message ||
-          "خطأ في الدخول أو الاتصال بالسيرفر"
+        error?.response?.data?.message || "خطأ في الدخول أو الاتصال بالسيرفر",
       );
     } finally {
       setLoading(false);
@@ -127,49 +141,61 @@ export default function Room() {
   }
 
   function startGame() {
-    if (!room) {
-      setMessage("أنشئ أو ادخل غرفة أولًا");
+    const socket = getSocket();
+    if (!socket || !room) {
+      setMessage("الاتصال غير متاح");
       return;
     }
+    socket.emit("startGame", { roomCode: room.code });
+  }
 
-    const playerName = name.trim() || "Player";
-
-    if (room.players.length < 2) {
-      setMessage("يجب وجود لاعبين على الأقل");
-      return;
+  function leaveRoom() {
+    const socket = getSocket();
+    if (socket && room) {
+      socket.emit("leaveRoom", { roomCode: room.code });
     }
+    disconnectSocket();
+    router.replace("/auth");
+  }
 
-    // نعتبر الغرفة بدأت محليًا للاختبار
-    const startedRoom: RoomData = {
-      ...room,
-      started: true,
+  useEffect(() => {
+    const socket = getSocket();
+    if (socket) socket.removeAllListeners();
+    return () => {
+      const s = getSocket();
+      if (s) s.removeAllListeners();
     };
+  }, []);
 
-    setRoom(startedRoom);
-    setMessage("بدأت اللعبة 🎉");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const auth = await ensureAuth();
+      if (!auth || cancelled) return;
 
-    // فتح شاشة اللعبة مباشرة
-    setTimeout(() => {
-      openGame(startedRoom, playerName);
-    }, 300);
-  }
+      const token = auth.token;
+      const socket = connectSocket(token);
+      socket.on("connect", () => {
+        setMessage("متصل بالسيرفر ✅");
+      });
+      socket.on("disconnect", () => {
+        setMessage("تم قطع الاتصال بالسيرفر");
+      });
+      socket.on("connect_error", () => {
+        setMessage("فشل الاتصال بالسيرفر");
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  function enterGame() {
-    if (!room) {
-      setMessage("لا توجد غرفة");
-      return;
-    }
-
-    const playerName = name.trim() || "Player";
-
-    openGame(room, playerName);
-  }
+  const players = room?.players || [];
+  const isHost = room?.host && true;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>
-        👑 ملوك الدومينو
-      </Text>
+      <Text style={styles.title}>👑 ملوك الدومينو</Text>
 
       <TextInput
         style={styles.input}
@@ -181,16 +207,11 @@ export default function Room() {
       />
 
       <TouchableOpacity
-        style={[
-          styles.button,
-          loading && styles.disabled,
-        ]}
+        style={[styles.button, loading && styles.disabled]}
         onPress={createRoom}
         disabled={loading}
       >
-        <Text style={styles.text}>
-          إنشاء غرفة
-        </Text>
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.text}>إنشاء غرفة (2 لاعبين)</Text>}
       </TouchableOpacity>
 
       <TextInput
@@ -204,87 +225,45 @@ export default function Room() {
       />
 
       <TouchableOpacity
-        style={[
-          styles.button,
-          loading && styles.disabled,
-        ]}
+        style={[styles.button, loading && styles.disabled]}
         onPress={joinRoom}
         disabled={loading}
       >
-        <Text style={styles.text}>
-          دخول غرفة
-        </Text>
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.text}>دخول غرفة</Text>}
       </TouchableOpacity>
 
       {room && (
         <View style={styles.roomBox}>
-          <Text style={styles.info}>
-            الكود: {room.code}
-          </Text>
-
-          <Text style={styles.info}>
-            المضيف: {room.host}
-          </Text>
-
-          <Text style={styles.info}>
-            اللاعبين:
-          </Text>
-
-          {room.players?.map((player, index) => (
-            <Text
-              key={index}
-              style={styles.player}
-            >
-              {index + 1}. {player}
-              {index === 0 ? " 👑" : ""}
+          <Text style={styles.info}>الكود: {room.code}</Text>
+          <Text style={styles.info}>اللاعبون: {players.length}/{room.maxPlayers}</Text>
+          {players.map((playerId) => (
+            <Text key={playerId} style={styles.player}>
+              • {room.playerNames?.[playerId] || playerId.slice(0, 8)}
+              {playerId === room.host ? " 👑" : ""}
             </Text>
           ))}
-
-          <Text style={styles.info}>
-            العدد: {room.players?.length || 0}/
-            {room.maxPlayers}
-          </Text>
-
-          <Text style={styles.status}>
-            {room.started
-              ? "اللعبة بدأت 🎮"
-              : "الغرفة جاهزة للبدء ⏳"}
-          </Text>
         </View>
       )}
 
       {room && !room.started && (
         <TouchableOpacity
-          style={[
-            styles.startButton,
-            loading && styles.disabled,
-          ]}
+          style={[styles.startButton, loading && styles.disabled]}
           onPress={startGame}
           disabled={loading}
         >
-          <Text style={styles.text}>
-            🎮 بدء لعبة الدومينو
-          </Text>
+          <Text style={styles.text}>🎮 بدء اللعبة</Text>
         </TouchableOpacity>
       )}
 
-      {room?.started && (
-        <TouchableOpacity
-          style={styles.gameButton}
-          onPress={enterGame}
-          disabled={loading}
-        >
-          <Text style={styles.text}>
-            🎲 دخول اللعبة
-          </Text>
+      {room && (
+        <TouchableOpacity style={styles.leaveButton} onPress={leaveRoom}>
+          <Text style={styles.text}>مغادرة الغرفة</Text>
         </TouchableOpacity>
       )}
 
-      {message !== "" && (
-        <Text style={styles.message}>
-          {message}
-        </Text>
-      )}
+      {message !== "" && <Text style={styles.message}>{message}</Text>}
+
+      {isHost ? null : null}
     </View>
   );
 }
@@ -330,16 +309,16 @@ const styles = StyleSheet.create({
     padding: 17,
     borderRadius: 12,
     alignItems: "center",
-    marginTop: 15,
+    marginTop: 10,
   },
 
-  gameButton: {
+  leaveButton: {
     backgroundColor: "#7c3aed",
     width: "90%",
     padding: 17,
     borderRadius: 12,
     alignItems: "center",
-    marginTop: 15,
+    marginTop: 10,
   },
 
   disabled: {
@@ -354,7 +333,7 @@ const styles = StyleSheet.create({
 
   message: {
     color: "#ffffff",
-    fontSize: 17,
+    fontSize: 16,
     margin: 15,
     textAlign: "center",
   },
@@ -377,12 +356,5 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 16,
     marginVertical: 3,
-  },
-
-  status: {
-    color: "#ffffff",
-    fontSize: 16,
-    marginTop: 10,
-    fontWeight: "bold",
   },
 });

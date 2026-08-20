@@ -106,3 +106,6 @@ mobile/*.log
 
 # Unity root-level misconfiguration guard (deprecated path)
 /KingsDomino/
+
+# Tool caches
+.qoder/

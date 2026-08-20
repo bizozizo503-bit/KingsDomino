@@ -1,27 +1,32 @@
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { useEffect, useState } from "react";
+import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
+import { getStoredToken } from "../lib/auth";
 
 export default function Home() {
   const router = useRouter();
+  const [checked, setChecked] = useState(false);
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>👑 ملوك الدومينو</Text>
+  useEffect(() => {
+    getStoredToken().then((token) => {
+      if (token) {
+        router.replace("/room");
+      } else {
+        router.replace("/auth");
+      }
+      setChecked(true);
+    });
+  }, [router]);
 
-      <Text style={styles.subtitle}>
-        لعبة الدومينو أونلاين
-      </Text>
+  if (!checked) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#facc15" />
+      </View>
+    );
+  }
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => router.push("/room")}
-      >
-        <Text style={styles.buttonText}>
-          دخول اللعبة
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -30,33 +35,5 @@ const styles = StyleSheet.create({
     backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
-  },
-
-  title: {
-    fontSize: 34,
-    fontWeight: "bold",
-    color: "#facc15",
-    marginBottom: 15,
-  },
-
-  subtitle: {
-    fontSize: 20,
-    color: "#ffffff",
-    marginBottom: 40,
-  },
-
-  button: {
-    width: "85%",
-    backgroundColor: "#2563eb",
-    padding: 17,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-
-  buttonText: {
-    color: "#ffffff",
-    fontSize: 20,
-    fontWeight: "bold",
   },
 });

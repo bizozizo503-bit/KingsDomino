@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -6,23 +6,14 @@ import {
   StyleSheet,
   ScrollView,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
-
-type Domino = {
-  id: number;
-  left: number;
-  right: number;
-};
-
-const INITIAL_DOMINOES: Domino[] = [
-  { id: 1, left: 6, right: 6 },
-  { id: 2, left: 6, right: 5 },
-  { id: 3, left: 5, right: 4 },
-  { id: 4, left: 4, right: 3 },
-  { id: 5, left: 3, right: 2 },
-  { id: 6, left: 2, right: 1 },
-  { id: 7, left: 1, right: 0 },
-];
+import { useRouter } from "expo-router";
+import { getStoredUser } from "../lib/auth";
+import { getSocket } from "../lib/socket";
+import {
+  Domino,
+  getInitialGameState,
+  setInitialGameState,
+} from "../lib/game-store";
 
 function DominoTile({
   domino,
@@ -42,9 +33,7 @@ function DominoTile({
       <View style={styles.half}>
         <Text style={styles.pips}>{domino.left}</Text>
       </View>
-
       <View style={styles.divider} />
-
       <View style={styles.half}>
         <Text style={styles.pips}>{domino.right}</Text>
       </View>
@@ -52,113 +41,153 @@ function DominoTile({
   );
 }
 
-export default function Game() {
+interface GameOverData {
+  winner: string | null;
+  blocked: boolean;
+  finishReason: string;
+  scores: Record<string, number> | null;
+  players: string[];
+}
+
+export default function GameScreen() {
   const router = useRouter();
+  const initial = getInitialGameState();
 
-  const params = useLocalSearchParams<{
-    roomCode?: string;
-    playerName?: string;
-  }>();
+  const [myId, setMyId] = useState("");
+  useEffect(() => {
+    getStoredUser().then((user) => {
+      if (user) setMyId(user.id);
+    });
+  }, []);
 
-  const roomCode = String(params.roomCode || "------");
-  const playerName = String(params.playerName || "Player");
-
-  const [hand, setHand] = useState<Domino[]>(INITIAL_DOMINOES);
-  const [board, setBoard] = useState<Domino[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [message, setMessage] = useState("دورك الآن");
-
-  const selectedDomino = useMemo(
-    () => hand.find((item) => item.id === selectedId),
-    [hand, selectedId]
+  const [hand, setHand] = useState<Domino[]>(initial?.hand ?? []);
+  const [board, setBoard] = useState<Domino[]>(initial?.board ?? []);
+  const [currentPlayer, setCurrentPlayer] = useState(
+    initial?.currentPlayer ?? "",
   );
+  const [players, setPlayers] = useState<string[]>(initial?.players ?? []);
+  const [playerNames, setPlayerNames] = useState<Record<string, string>>(
+    initial?.playerNames ?? {},
+  );
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [message, setMessage] = useState("في انتظار اللعبة...");
+  const [gameOver, setGameOver] = useState<GameOverData | null>(null);
 
-  function playDomino(domino: Domino) {
-    setBoard((current) => [...current, domino]);
-    setHand((current) => current.filter((item) => item.id !== domino.id));
-    setSelectedId(null);
-    setMessage("تم لعب القطعة • الدور التالي");
+  const roomCode = initial?.roomCode ?? "";
+
+  const isMyTurn = currentPlayer !== "" && myId !== "" && currentPlayer === myId;
+
+  function playSelected() {
+    const socket = getSocket();
+    if (!socket || selectedIndex === null || !isMyTurn) return;
+    socket.emit("playDomino", { roomCode, tileIndex: selectedIndex });
   }
 
-  function drawDomino() {
-    const newId = Date.now();
+  useEffect(() => {
+    if (!initial) {
+      router.replace("/room");
+      return;
+    }
 
-    const newDomino: Domino = {
-      id: newId,
-      left: Math.floor(Math.random() * 7),
-      right: Math.floor(Math.random() * 7),
+    const socket = getSocket();
+    if (!socket) {
+      router.replace("/room");
+      return;
+    }
+
+    const onDominoPlayed = (data: any) => {
+      setBoard(data.board || []);
+      setCurrentPlayer(data.currentPlayer || "");
+
+      if (data.tile) {
+        setHand((prev) => {
+          const removedIndex = selectedIndex;
+          if (removedIndex !== null && prev.length > removedIndex) {
+            return prev.filter((_, i) => i !== removedIndex);
+          }
+          return prev.length > data.myHandCount
+            ? prev.slice(0, data.myHandCount)
+            : prev;
+        });
+      }
+      setSelectedIndex(null);
+
+      if (data.winner || data.blocked) {
+        setGameOver({
+          winner: data.winner,
+          blocked: data.blocked,
+          finishReason:
+            data.finishReason || (data.blocked ? "blocked" : "normal"),
+          scores: data.scores,
+          players,
+        });
+      } else if (data.currentPlayer === myId) {
+        setMessage("دورك الآن");
+      } else {
+        setMessage("دور الخصم...");
+      }
     };
 
-    setHand((current) => [...current, newDomino]);
-    setMessage("سحبت قطعة جديدة");
-  }
+    const onGameOver = (data: any) => {
+      setGameOver({
+        winner: data.winner,
+        blocked: data.blocked,
+        finishReason: data.finishReason,
+        scores: data.scores,
+        players: data.players || players,
+      });
+    };
 
-  function passTurn() {
-    setSelectedId(null);
-    setMessage("تم تمرير الدور");
-  }
+    const onGameError = (data: any) => {
+      setMessage(data?.message || "خطأ في اللعبة");
+    };
+
+    socket.on("dominoPlayed", onDominoPlayed);
+    socket.on("gameOver", onGameOver);
+    socket.on("gameError", onGameError);
+
+    return () => {
+      socket.off("dominoPlayed", onDominoPlayed);
+      socket.off("gameOver", onGameOver);
+      socket.off("gameError", onGameError);
+    };
+  }, [initial, router, players, myId]);
+
+  const myScore =
+    gameOver?.scores && myId ? gameOver.scores[myId] ?? null : null;
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Text style={styles.backText}>‹</Text>
-        </TouchableOpacity>
-
-        <View style={styles.headerCenter}>
-          <Text style={styles.title}>ملوك الدومينو</Text>
-          <Text style={styles.roomText}>الغرفة: {roomCode}</Text>
-        </View>
-
-        <View style={styles.scoreBox}>
-          <Text style={styles.scoreLabel}>النقاط</Text>
-          <Text style={styles.score}>0</Text>
-        </View>
+        <Text style={styles.title}>ملوك الدومينو</Text>
+        <Text style={styles.roomText}>الغرفة: {roomCode}</Text>
       </View>
 
-      {/* Players */}
       <View style={styles.playersRow}>
-        <View style={styles.player}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>👑</Text>
+        {players.map((playerId) => (
+          <View key={playerId} style={styles.player}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {playerId === myId ? "👑" : "🀄"}
+              </Text>
+            </View>
+            <Text style={styles.playerName}>
+              {playerNames[playerId] || playerId.slice(0, 8)}
+            </Text>
+            <Text
+              style={[
+                styles.playerStatus,
+                currentPlayer === playerId && styles.playerStatusActive,
+              ]}
+            >
+              {currentPlayer === playerId ? "يلعب الآن" : "في انتظار"}
+            </Text>
           </View>
-          <Text style={styles.playerName}>{playerName}</Text>
-          <Text style={styles.playerStatus}>أنت</Text>
-        </View>
-
-        <View style={styles.player}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>🤖</Text>
-          </View>
-          <Text style={styles.playerName}>لاعب 2</Text>
-          <Text style={styles.playerStatus}>متصل</Text>
-        </View>
-
-        <View style={styles.player}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>🤖</Text>
-          </View>
-          <Text style={styles.playerName}>لاعب 3</Text>
-          <Text style={styles.playerStatus}>متصل</Text>
-        </View>
-
-        <View style={styles.player}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>🤖</Text>
-          </View>
-          <Text style={styles.playerName}>لاعب 4</Text>
-          <Text style={styles.playerStatus}>متصل</Text>
-        </View>
+        ))}
       </View>
 
-      {/* Table */}
       <View style={styles.table}>
         <Text style={styles.tableTitle}>طاولة اللعب</Text>
-
         <ScrollView
           horizontal
           contentContainerStyle={styles.board}
@@ -167,68 +196,86 @@ export default function Game() {
           {board.length === 0 ? (
             <View style={styles.emptyBoard}>
               <Text style={styles.emptyIcon}>🀄</Text>
-              <Text style={styles.emptyText}>ابدأ اللعب بوضع أول قطعة</Text>
+              <Text style={styles.emptyText}>اللعبة تبدأ بوضع أول قطعة</Text>
             </View>
           ) : (
-            board.map((domino) => (
-              <DominoTile key={domino.id} domino={domino} />
+            board.map((domino, index) => (
+              <DominoTile key={index} domino={domino} />
             ))
           )}
         </ScrollView>
-
         <View style={styles.turnBox}>
-          <View style={styles.turnDot} />
+          <View style={[styles.turnDot, isMyTurn && styles.turnDotActive]} />
           <Text style={styles.turnText}>{message}</Text>
         </View>
       </View>
 
-      {/* Hand */}
       <View style={styles.handSection}>
-        <Text style={styles.handTitle}>
-          قطعك ({hand.length})
-        </Text>
-
+        <Text style={styles.handTitle}>قطعك ({hand.length})</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.hand}
         >
-          {hand.map((domino) => (
+          {hand.map((domino, index) => (
             <DominoTile
-              key={domino.id}
+              key={index}
               domino={domino}
-              selected={selectedId === domino.id}
-              onPress={() => setSelectedId(domino.id)}
+              selected={selectedIndex === index}
+              onPress={() => setSelectedIndex(index)}
             />
           ))}
         </ScrollView>
       </View>
 
-      {/* Actions */}
       <View style={styles.actions}>
         <TouchableOpacity
           style={[
             styles.playButton,
-            !selectedDomino && styles.disabledButton,
+            (!isMyTurn || selectedIndex === null) && styles.disabledButton,
           ]}
-          disabled={!selectedDomino}
-          onPress={() => {
-            if (selectedDomino) {
-              playDomino(selectedDomino);
-            }
-          }}
+          disabled={!isMyTurn || selectedIndex === null}
+          onPress={playSelected}
         >
-          <Text style={styles.actionText}>🀄 لعب القطعة</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.drawButton} onPress={drawDomino}>
-          <Text style={styles.actionText}>سحب</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.passButton} onPress={passTurn}>
-          <Text style={styles.actionText}>تمرير</Text>
+          <Text style={styles.actionText}>
+            {isMyTurn ? "🀄 لعب القطعة" : "انتظر دورك"}
+          </Text>
         </TouchableOpacity>
       </View>
+
+      {gameOver && (
+        <View style={styles.overlay}>
+          <View style={styles.overlayBox}>
+            <Text style={styles.overlayTitle}>
+              {gameOver.finishReason === "blocked"
+                ? "اللعبة انتهت (توقف)"
+                : "🎉 انتهت اللعبة"}
+            </Text>
+            {gameOver.winner ? (
+              <Text style={styles.overlayText}>
+                الفائز:{" "}
+                {playerNames[gameOver.winner] || gameOver.winner.slice(0, 8)}
+              </Text>
+            ) : (
+              <Text style={styles.overlayText}>لا يوجد فائز (تعادل)</Text>
+            )}
+            {myScore !== null && (
+              <Text style={styles.overlayScore}>
+                نقاطك المتبقية: {myScore}
+              </Text>
+            )}
+            <TouchableOpacity
+              style={styles.overlayButton}
+              onPress={() => {
+                setInitialGameState(null);
+                router.replace("/room");
+              }}
+            >
+              <Text style={styles.overlayButtonText}>العودة للغرف</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -241,30 +288,9 @@ const styles = StyleSheet.create({
   },
 
   header: {
-    minHeight: 72,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-  },
-
-  backButton: {
-    width: 45,
-    height: 45,
-    borderRadius: 23,
-    backgroundColor: "#172235",
+    minHeight: 64,
     alignItems: "center",
     justifyContent: "center",
-  },
-
-  backText: {
-    color: "#ffffff",
-    fontSize: 36,
-    lineHeight: 40,
-  },
-
-  headerCenter: {
-    flex: 1,
-    alignItems: "center",
   },
 
   title: {
@@ -279,25 +305,6 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
-  scoreBox: {
-    backgroundColor: "#172235",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    alignItems: "center",
-  },
-
-  scoreLabel: {
-    color: "#94a3b8",
-    fontSize: 10,
-  },
-
-  score: {
-    color: "#facc15",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-
   playersRow: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -307,7 +314,7 @@ const styles = StyleSheet.create({
 
   player: {
     alignItems: "center",
-    width: "24%",
+    width: "30%",
   },
 
   avatar: {
@@ -333,8 +340,13 @@ const styles = StyleSheet.create({
   },
 
   playerStatus: {
-    color: "#22c55e",
+    color: "#64748b",
     fontSize: 10,
+  },
+
+  playerStatusActive: {
+    color: "#22c55e",
+    fontWeight: "bold",
   },
 
   table: {
@@ -391,8 +403,12 @@ const styles = StyleSheet.create({
     width: 9,
     height: 9,
     borderRadius: 5,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#64748b",
     marginRight: 7,
+  },
+
+  turnDotActive: {
+    backgroundColor: "#22c55e",
   },
 
   turnText: {
@@ -460,28 +476,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 15,
     paddingTop: 5,
-    gap: 8,
   },
 
   playButton: {
-    flex: 1.5,
+    flex: 1,
     backgroundColor: "#16a34a",
-    borderRadius: 12,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-
-  drawButton: {
-    flex: 1,
-    backgroundColor: "#2563eb",
-    borderRadius: 12,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-
-  passButton: {
-    flex: 1,
-    backgroundColor: "#475569",
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: "center",
@@ -493,7 +492,60 @@ const styles = StyleSheet.create({
 
   actionText: {
     color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+
+  overlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  overlayBox: {
+    backgroundColor: "#1f2937",
+    borderRadius: 18,
+    padding: 24,
+    width: "85%",
+    alignItems: "center",
+  },
+
+  overlayTitle: {
+    color: "#facc15",
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 12,
+  },
+
+  overlayText: {
+    color: "#ffffff",
+    fontSize: 16,
+    marginBottom: 6,
+  },
+
+  overlayScore: {
+    color: "#94a3b8",
     fontSize: 14,
+    marginBottom: 12,
+  },
+
+  overlayButton: {
+    backgroundColor: "#2563eb",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+
+  overlayButtonText: {
+    color: "#ffffff",
+    fontSize: 16,
     fontWeight: "bold",
   },
 });

@@ -12,6 +12,8 @@ export interface GameState {
   board: any[];
   hands: Record<string, any[]>;
   finishReason?: 'normal' | 'blocked';
+  winner?: string | null;
+  scores?: Record<string, number>;
 }
 
 export interface Room {
@@ -40,6 +42,12 @@ export class RoomsService implements OnModuleDestroy {
   private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
   private readonly PLAYER_DISCONNECT_TIMEOUT_MS = 60 * 1000;
 
+  private onPlayerRemovedHandler: ((
+    code: string,
+    playerId: string,
+    reason: 'disconnect' | 'leave',
+  ) => void) | null = null;
+
   constructor(private readonly dominoService: DominoService) {
     this.cleanupTimer = setInterval(
       () => this.cleanup(),
@@ -56,6 +64,12 @@ export class RoomsService implements OnModuleDestroy {
       clearTimeout(timer);
     }
     this.disconnectedTimers.clear();
+  }
+
+  setPlayerRemovedHandler(
+    handler: (code: string, playerId: string, reason: 'disconnect' | 'leave') => void,
+  ): void {
+    this.onPlayerRemovedHandler = handler;
   }
 
   create(data: {
@@ -241,6 +255,9 @@ export class RoomsService implements OnModuleDestroy {
       room.started = false;
       room.gameState.started = false;
       room.gameState.finishReason = 'normal';
+      room.gameState.currentPlayer = '';
+      room.gameState.winner = playerId;
+      room.gameState.scores = this.computeScores(room);
       room.lastActivity = Date.now();
 
       return {
@@ -249,6 +266,8 @@ export class RoomsService implements OnModuleDestroy {
         winner: playerId,
         skippedPlayers: [],
         blocked: false,
+        finishReason: 'normal' as const,
+        scores: room.gameState.scores,
       };
     }
 
@@ -259,6 +278,9 @@ export class RoomsService implements OnModuleDestroy {
       room.started = false;
       room.gameState.started = false;
       room.gameState.finishReason = 'blocked';
+      room.gameState.currentPlayer = '';
+      room.gameState.scores = this.computeScores(room);
+      room.gameState.winner = this.blockedWinner(room);
     }
 
     room.lastActivity = Date.now();
@@ -266,10 +288,28 @@ export class RoomsService implements OnModuleDestroy {
     return {
       room,
       tile: orientedTile,
-      winner: null,
+      winner: room.gameState.winner ?? null,
       skippedPlayers,
       blocked,
+      finishReason: blocked
+        ? ('blocked' as const)
+        : (room.gameState.finishReason ?? null),
+      scores: room.gameState.scores ?? null,
     };
+  }
+
+  leaveRoom(code: string, playerId: string): Room | undefined {
+    const room = this.findByCode(code);
+    if (!room) return room;
+
+    const timerKey = `${code}:${playerId}`;
+    if (this.disconnectedTimers.has(timerKey)) {
+      clearTimeout(this.disconnectedTimers.get(timerKey)!);
+      this.disconnectedTimers.delete(timerKey);
+    }
+
+    this.removePlayer(code, playerId, 'leave');
+    return room;
   }
 
   handleDisconnect(code: string, playerId: string): void {
@@ -286,13 +326,17 @@ export class RoomsService implements OnModuleDestroy {
 
     const timer = setTimeout(() => {
       this.disconnectedTimers.delete(timerKey);
-      this.removePlayer(code, playerId);
+      this.removePlayer(code, playerId, 'disconnect');
     }, this.PLAYER_DISCONNECT_TIMEOUT_MS);
 
     this.disconnectedTimers.set(timerKey, timer);
   }
 
-  private removePlayer(code: string, playerId: string): void {
+  private removePlayer(
+    code: string,
+    playerId: string,
+    reason: 'disconnect' | 'leave' = 'disconnect',
+  ): void {
     const room = this.findByCode(code);
     if (!room) return;
 
@@ -308,6 +352,7 @@ export class RoomsService implements OnModuleDestroy {
       if (room.players.length === 0) {
         this.rooms.delete(code);
       }
+      this.onPlayerRemovedHandler?.(code, playerId, reason);
       return;
     }
 
@@ -315,21 +360,31 @@ export class RoomsService implements OnModuleDestroy {
       room.status = 'finished';
       room.started = false;
       room.gameState.started = false;
+      room.gameState.finishReason = 'blocked';
+      room.gameState.winner = null;
+      room.gameState.currentPlayer = '';
+      this.onPlayerRemovedHandler?.(code, playerId, reason);
       return;
     }
 
     if (room.gameState.currentPlayer === playerId) {
       const newIndex = playerIndex % room.players.length;
       room.gameState.currentPlayer = room.players[newIndex];
+      this.advancePastBlocked(room, newIndex);
     }
 
     if (room.players.length === 1) {
       room.status = 'finished';
       room.started = false;
       room.gameState.started = false;
+      room.gameState.finishReason = 'normal';
+      room.gameState.currentPlayer = '';
+      room.gameState.winner = room.players[0];
+      room.gameState.scores = this.computeScores(room);
     }
 
     room.lastActivity = Date.now();
+    this.onPlayerRemovedHandler?.(code, playerId, reason);
   }
 
   private getPlacementSide(board: Domino[], tile: Domino): 'left' | 'right' | null {
@@ -391,6 +446,67 @@ export class RoomsService implements OnModuleDestroy {
       if (nextIndex === startIndex) {
         return { skippedPlayers, blocked: true };
       }
+    }
+  }
+
+  private computeScores(room: Room): Record<string, number> {
+    const scores: Record<string, number> = {};
+    for (const playerId of room.gameState.players) {
+      const hand = room.gameState.hands[playerId] || [];
+      scores[playerId] = hand.reduce(
+        (sum, tile) => sum + (tile.left || 0) + (tile.right || 0),
+        0,
+      );
+    }
+    return scores;
+  }
+
+  private blockedWinner(room: Room): string | null {
+    const scores = this.computeScores(room);
+    const entries = Object.entries(scores).sort((a, b) => a[1] - b[1]);
+
+    if (entries.length === 0) return null;
+    if (entries.length === 1) return entries[0][0];
+
+    const lowest = entries[0][1];
+    const lowestPlayers = entries.filter(e => e[1] === lowest);
+
+    return lowestPlayers.length === 1 ? lowestPlayers[0][0] : null;
+  }
+
+  private advancePastBlocked(room: Room, fromIndex: number): void {
+    const board = room.gameState.board;
+    if (board.length === 0) return;
+
+    const leftEnd = board[0].left;
+    const rightEnd = board[board.length - 1].right;
+
+    let index = fromIndex;
+    const startIndex = index;
+
+    for (let i = 0; i < room.players.length; i++) {
+      const player = room.players[index];
+      const hand = room.gameState.hands[player] || [];
+
+      if (
+        hand.length > 0 &&
+        this.dominoService.hasPlayableTile(hand, leftEnd, rightEnd)
+      ) {
+        room.gameState.currentPlayer = player;
+        return;
+      }
+
+      index = (index + 1) % room.players.length;
+    }
+
+    if (startIndex === index) {
+      room.status = 'finished';
+      room.started = false;
+      room.gameState.started = false;
+      room.gameState.finishReason = 'blocked';
+      room.gameState.currentPlayer = '';
+      room.gameState.winner = this.blockedWinner(room);
+      room.gameState.scores = this.computeScores(room);
     }
   }
 

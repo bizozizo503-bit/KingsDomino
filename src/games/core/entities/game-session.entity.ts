@@ -29,10 +29,10 @@ export class GameSession {
   @Column({ type: 'enum', enum: SessionStatus, default: SessionStatus.WAITING })
   status: SessionStatus;
 
-  @Column({ type: 'simple-json', default: '[]' })
+  @Column({ type: 'simple-json' })
   player_ids: string[];
 
-  @Column({ type: 'simple-json', default: '{}' })
+  @Column({ type: 'simple-json' })
   player_names: Record<string, string>;
 
   @Column({ type: 'simple-json', nullable: true })

@@ -80,7 +80,7 @@ export class PlayerEventProgress {
   @Column()
   user_id: string;
 
-  @Column({ type: 'simple-json', default: {} })
+  @Column({ type: 'simple-json' })
   mission_progress: Record<string, number>;
 
   @Column({ type: 'boolean', default: false })

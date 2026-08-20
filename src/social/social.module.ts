@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PlayerProfile } from './entities/player-profile.entity';
 import { Friendship } from './entities/friendship.entity';
 import { ChatMessage } from './entities/chat-message.entity';
@@ -16,6 +18,13 @@ import { CommonModule } from '../common/common.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([PlayerProfile, Friendship, ChatMessage, Notification]),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get<string>('JWT_SECRET'),
+      }),
+    }),
     UsersModule,
     CommonModule,
   ],

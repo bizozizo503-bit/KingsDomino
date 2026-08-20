@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { Coupon } from './coupon.entity';
 
-@Entity('coupon_redemptions')
+@Entity('coupon_redemptions', { synchronize: false })
 @Index('UQ_coupon_redemption_coupon_user', ['coupon_id', 'user_id'], { unique: true })
 export class CouponRedemption {
   @PrimaryGeneratedColumn('uuid')

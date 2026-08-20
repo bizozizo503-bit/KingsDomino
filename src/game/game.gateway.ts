@@ -3,18 +3,20 @@
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
   WsException,
 } from '@nestjs/websockets';
-import { ValidationPipe, UseGuards } from '@nestjs/common';
+import { Logger, ValidationPipe, UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { RoomsService } from '../rooms/rooms.service';
 import { JwtService } from '@nestjs/jwt';
 import {
   ChatEventDto,
   JoinRoomEventDto,
+  LeaveRoomEventDto,
   PlayDominoEventDto,
   StartGameEventDto,
 } from './dto/game-events.dto';
@@ -25,9 +27,13 @@ import { WsRateLimitGuard } from '../common/guards/ws-rate-limit.guard';
 @WebSocketGateway({
   cors: { origin: process.env.CORS_ORIGINS?.split(',').map(value => value.trim()).filter(Boolean) || true },
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class GameGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
+{
   @WebSocketServer()
   server: Server;
+
+  private readonly logger = new Logger(GameGateway.name);
 
   private clientRooms = new Map<string, Set<string>>();
   private readonly MAX_CHAT_LENGTH = 200;
@@ -37,6 +43,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
   ) {}
+
+  afterInit() {
+    this.roomsService.setPlayerRemovedHandler((code, playerId, reason) => {
+      const room = this.roomsService.getRoom(code);
+      if (room) {
+        this.server.to(code).emit('roomUpdated', this.roomsService.toPublicRoom(room));
+
+        if (room.started) {
+          this.server.to(code).emit('gameError', {
+            message:
+              reason === 'disconnect'
+                ? 'تم قطع اتصال أحد اللاعبين'
+                : 'غادر أحد اللاعبين اللعبة',
+          });
+        }
+      }
+    });
+
+    this.logger.log('Game gateway initialized');
+  }
 
   async handleConnection(client: Socket) {
     const token =
@@ -194,6 +220,54 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
             ),
           ),
         });
+      }
+
+      if (result.winner || result.blocked) {
+        this.server.to(result.room.code).emit('gameOver', {
+          roomCode: result.room.code,
+          winner: result.winner,
+          blocked: result.blocked,
+          finishReason: result.finishReason,
+          scores: result.scores,
+          players: result.room.players,
+          board: result.room.gameState.board,
+          handsCounts: Object.fromEntries(
+            Object.entries(result.room.gameState.hands).map(
+              ([id, h]) => [id, h.length],
+            ),
+          ),
+        });
+      }
+    } catch (error) {
+      client.emit('gameError', {
+        message: this.errorMessage(error),
+      });
+    }
+  }
+
+  @SubscribeMessage('leaveRoom')
+  handleLeave(
+    @MessageBody(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
+    data: LeaveRoomEventDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = (client as any).userId as string;
+
+    if (!userId) {
+      client.emit('gameError', { message: 'غير مصرح' });
+      return;
+    }
+
+    try {
+      const room = this.roomsService.leaveRoom(data.roomCode, userId);
+
+      client.leave(data.roomCode);
+      client.leave(userId);
+
+      this.clientRooms.get(client.id)?.delete(data.roomCode);
+
+      if (room) {
+        this.server.to(data.roomCode).emit('roomUpdated', this.roomsService.toPublicRoom(room));
       }
     } catch (error) {
       client.emit('gameError', {

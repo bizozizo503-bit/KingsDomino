@@ -44,6 +44,7 @@ import { GameEvent, PlayerEventProgress } from './events/entities/event.entity';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         type: 'mysql',
+        connectorPackage: 'mysql2',
         host: configService.get<string>('DB_HOST', 'localhost'),
         port: Number(configService.get<string>('DB_PORT', '3306')),
         username: configService.get<string>('DB_USERNAME', 'root'),

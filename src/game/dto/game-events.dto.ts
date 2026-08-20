@@ -18,6 +18,12 @@ export class StartGameEventDto {
   roomCode: string;
 }
 
+export class LeaveRoomEventDto {
+  @IsString()
+  @Matches(/^[a-fA-F0-9]{6}$/)
+  roomCode: string;
+}
+
 export class PlayDominoEventDto {
   @IsString()
   @Matches(/^[a-fA-F0-9]{6}$/)

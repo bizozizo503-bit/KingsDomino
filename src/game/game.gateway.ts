@@ -21,6 +21,7 @@ import {
   StartGameEventDto,
 } from './dto/game-events.dto';
 import { UsersService } from '../users/users.service';
+import { GameSessionService } from '../games/core/game-session.service';
 import { WsRateLimitGuard } from '../common/guards/ws-rate-limit.guard';
 
 @UseGuards(WsRateLimitGuard)
@@ -42,6 +43,7 @@ export class GameGateway
     private readonly roomsService: RoomsService,
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
+    private readonly gameSessionService: GameSessionService,
   ) {}
 
   afterInit() {
@@ -57,6 +59,20 @@ export class GameGateway
                 ? 'تم قطع اتصال أحد اللاعبين'
                 : 'غادر أحد اللاعبين اللعبة',
           });
+        }
+
+        if (!room.started && room.gameState.sessionId && room.gameState.finishReason) {
+          void this.gameSessionService
+            .completeRoomSession(room.gameState.sessionId, {
+              winner: room.gameState.winner ?? null,
+              finishReason:
+                room.gameState.finishReason === 'normal' ? 'normal' : 'disconnect',
+              scores: room.gameState.scores ?? null,
+              board: room.gameState.board,
+            })
+            .catch((error) => {
+              this.logger.error('Failed to complete game session after player removal', error);
+            });
         }
       }
     });
@@ -138,7 +154,7 @@ export class GameGateway
   }
 
   @SubscribeMessage('startGame')
-  handleStart(
+  async handleStart(
   @MessageBody(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true })) data: StartGameEventDto,
     @ConnectedSocket() client: Socket,
   ) {
@@ -177,6 +193,19 @@ export class GameGateway
       }
 
       this.server.to(startedRoom.code).emit('roomUpdated', this.roomsService.toPublicRoom(startedRoom));
+
+      if (!startedRoom.gameState.sessionId) {
+        try {
+          const session = await this.gameSessionService.createRoomSession(
+            startedRoom.code,
+            startedRoom.players,
+            startedRoom.playerNames,
+          );
+          startedRoom.gameState.sessionId = session.id;
+        } catch (error) {
+          this.logger.error('Failed to record game session on start', (error as Error).stack);
+        }
+      }
     } catch (error) {
       this.server.to(data.roomCode).emit('gameError', {
         message: this.errorMessage(error),
@@ -185,7 +214,7 @@ export class GameGateway
   }
 
   @SubscribeMessage('playDomino')
-  handlePlay(
+  async handlePlay(
     @MessageBody(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
     data: PlayDominoEventDto,
     @ConnectedSocket() client: Socket,
@@ -223,6 +252,25 @@ export class GameGateway
       }
 
       if (result.winner || result.blocked) {
+        const sessionId = result.room.gameState.sessionId;
+        if (sessionId) {
+          try {
+            await this.gameSessionService.completeRoomSession(sessionId, {
+              winner: result.winner,
+              finishReason: result.blocked ? 'blocked' : 'normal',
+              scores: result.scores,
+              board: result.room.gameState.board,
+              handCounts: Object.fromEntries(
+                Object.entries(result.room.gameState.hands).map(
+                  ([id, h]) => [id, h.length],
+                ),
+              ),
+            });
+          } catch (error) {
+            this.logger.error('Failed to complete game session', (error as Error).stack);
+          }
+        }
+
         this.server.to(result.room.code).emit('gameOver', {
           roomCode: result.room.code,
           winner: result.winner,

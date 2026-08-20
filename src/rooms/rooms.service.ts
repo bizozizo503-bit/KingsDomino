@@ -14,6 +14,7 @@ export interface GameState {
   finishReason?: 'normal' | 'blocked';
   winner?: string | null;
   scores?: Record<string, number>;
+  sessionId?: string;
 }
 
 export interface Room {

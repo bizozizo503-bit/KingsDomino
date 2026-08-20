@@ -129,6 +129,58 @@ export class GameSessionService {
     return undefined;
   }
 
+  async createRoomSession(
+    roomCode: string,
+    playerIds: string[],
+    playerNames: Record<string, string>,
+  ): Promise<GameSession> {
+    const session = this.sessionRepo.create({
+      game_id: 'domino',
+      room_code: roomCode,
+      status: SessionStatus.PLAYING,
+      player_ids: [...new Set(playerIds)],
+      player_names: playerNames,
+      state: { engine: 'rooms' },
+      round_number: 1,
+      started_at: Date.now(),
+    });
+
+    const saved = await this.sessionRepo.save(session);
+    this.logger.log(`Recorded domino session ${saved.id} for room ${roomCode}`);
+    return saved;
+  }
+
+  async completeRoomSession(
+    sessionId: string,
+    data: {
+      winner: string | null;
+      finishReason: 'normal' | 'blocked' | 'disconnect' | 'surrender';
+      scores: Record<string, number> | null;
+      board?: any[];
+      handCounts?: Record<string, number>;
+    },
+  ): Promise<GameSession | null> {
+    const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
+    if (!session) return null;
+    if (session.status === SessionStatus.FINISHED) return session;
+
+    session.status = SessionStatus.FINISHED;
+    session.winner_id = data.winner ?? '';
+    session.finished_at = Date.now();
+    session.finish_reason = data.finishReason;
+    session.result = {
+      reason: data.finishReason,
+      winner: data.winner,
+      scores: data.scores,
+      board: data.board ?? null,
+      handCounts: data.handCounts ?? null,
+    };
+
+    const saved = await this.sessionRepo.save(session);
+    this.logger.log(`Completed domino session ${sessionId} (winner=${data.winner})`);
+    return saved;
+  }
+
   getStateForPlayer(sessionId: string, playerId: string): Record<string, any> | null {
     const active = this.activeSessions.get(sessionId);
     if (!active) return null;

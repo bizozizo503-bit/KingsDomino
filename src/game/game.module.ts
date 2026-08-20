@@ -7,6 +7,7 @@ import { DominoService } from './domino.service';
 import { RoomsModule } from '../rooms/rooms.module';
 import { UsersModule } from '../users/users.module';
 import { CommonModule } from '../common/common.module';
+import { GamesModule } from '../games/games.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CommonModule } from '../common/common.module';
     forwardRef(() => RoomsModule),
     UsersModule,
     CommonModule,
+    GamesModule,
   ],
   providers: [GameGateway, DominoService],
   exports: [DominoService],

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { io, Socket } from 'socket.io-client';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 interface Tile {
@@ -275,6 +276,20 @@ describe('Domino Online MVP (e2e WS smoke test)', () => {
       expect(over.scores[over.winner]).toBe(0);
     }
     expect(over.players.length).toBeGreaterThanOrEqual(1);
+
+    // 7. Persistence: a finished GameSession row must exist for this room
+    const dataSource = app.get(DataSource);
+    const rows = await dataSource.query(
+      `SELECT status, winner_id, finish_reason, result
+       FROM game_sessions WHERE room_code = ?`,
+      [roomCode],
+    );
+    expect(rows.length).toBe(1);
+    expect(rows[0].status).toBe('finished');
+    expect(rows[0].finish_reason).toBe(over.finishReason);
+    if (over.winner) {
+      expect(rows[0].winner_id).toBe(over.winner);
+    }
 
     p1.disconnect();
     p2.disconnect();

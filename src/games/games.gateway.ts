@@ -28,6 +28,21 @@ import {
   ResignDto,
 } from './dto/games.dto';
 
+/**
+ * @deprecated
+ * This gateway is the ORIGINAL generic multi-game matchmaking/session prototype.
+ * It is NOT used by the Domino MVP.
+ *
+ * Known issue: broadcasts target `this.server.to(playerId)`, i.e. rooms named by
+ * playerId. No client ever joins such a room, so `gameStarted` / `gameUpdate` /
+ * `gameOver` events are never received by players. The default-namespace
+ * GameGateway (src/game/game.gateway.ts) is the authoritative, working gateway
+ * for the Domino MVP and emits to the room.code namespace room plus per-user
+ * rooms it creates in joinRoom.
+ *
+ * Kept frozen for future non-Domino game work (matchmaking, generic sessions,
+ * leaderboards, rewards). Do not use for the MVP.
+ */
 @UseGuards(WsRateLimitGuard)
 @WebSocketGateway({
   cors: { origin: process.env.CORS_ORIGINS?.split(',').map(value => value.trim()).filter(Boolean) || true },

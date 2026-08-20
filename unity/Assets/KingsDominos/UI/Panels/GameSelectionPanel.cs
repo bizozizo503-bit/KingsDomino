@@ -31,7 +31,7 @@ namespace KingsDominos.UI.Panels
             casualTab?.onClick.AddListener(() => FilterGames("casual"));
 
             if (headerText != null)
-                headerText.text = "اختر اللعبة";
+                ArabicFontHelper.SetText(headerText, "اختر اللعبة");
 
             PopulateGames();
         }
@@ -89,11 +89,12 @@ namespace KingsDominos.UI.Panels
             var nameObj = new GameObject("Name", typeof(RectTransform), typeof(TextMeshProUGUI));
             nameObj.transform.SetParent(obj.transform, false);
             var nameTxt = nameObj.GetComponent<TextMeshProUGUI>();
-            nameTxt.text = nameAr;
-            nameTxt.fontSize = 28;
+            nameTxt.fontSize = 30;
             nameTxt.color = Color.white;
             nameTxt.alignment = TextAlignmentOptions.Center;
             nameTxt.fontStyle = FontStyles.Bold;
+            ArabicFontHelper.ApplyToText(nameTxt);
+            ArabicFontHelper.SetText(nameTxt, nameAr);
             var nr = nameObj.GetComponent<RectTransform>();
             nr.anchorMin = new Vector2(0, 0.5f);
             nr.anchorMax = new Vector2(1, 0.85f);
@@ -103,10 +104,11 @@ namespace KingsDominos.UI.Panels
             var infoObj = new GameObject("Info", typeof(RectTransform), typeof(TextMeshProUGUI));
             infoObj.transform.SetParent(obj.transform, false);
             var infoTxt = infoObj.GetComponent<TextMeshProUGUI>();
-            infoTxt.text = $"{players} لاعبين";
-            infoTxt.fontSize = 18;
+            infoTxt.fontSize = 22;
             infoTxt.color = new Color(0.7f, 0.7f, 0.7f);
             infoTxt.alignment = TextAlignmentOptions.Center;
+            ArabicFontHelper.ApplyToText(infoTxt);
+            ArabicFontHelper.SetText(infoTxt, $"{players} لاعبين");
             var ir = infoObj.GetComponent<RectTransform>();
             ir.anchorMin = new Vector2(0, 0.15f);
             ir.anchorMax = new Vector2(1, 0.4f);

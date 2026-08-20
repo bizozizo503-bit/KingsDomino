@@ -52,13 +52,13 @@ namespace KingsDominos.UI.Panels
         private void OnMusicChanged(float val)
         {
             Managers.AudioManager.Instance.SetMusicVolume(val);
-            if (musicLabel != null) musicLabel.text = $"الموسيقى: {(int)(val * 100)}%";
+            ArabicFontHelper.SetText(musicLabel, $"الموسيقى: {(int)(val * 100)}%");
         }
 
         private void OnSFXChanged(float val)
         {
             Managers.AudioManager.Instance.SetSFXVolume(val);
-            if (sfxLabel != null) sfxLabel.text = $"المؤثرات: {(int)(val * 100)}%";
+            ArabicFontHelper.SetText(sfxLabel, $"المؤثرات: {(int)(val * 100)}%");
         }
 
         private void OnBackClicked() => _panelManager?.GoBack();

@@ -64,17 +64,16 @@ namespace KingsDominos.UI.Panels
             AutoWire();
             var player = GameManager.Instance.PlayerData;
 
-            if (titleText != null)
-                titleText.text = "ملوك الدومينو";
+            ArabicFontHelper.SetText(titleText, "ملوك الدومينو");
 
             if (goldText != null)
-                goldText.text = player.Gold.ToString("N0");
+                ArabicFontHelper.SetText(goldText, player.Gold.ToString("N0"));
 
             if (levelText != null)
-                levelText.text = $"المستوى {player.Level}";
+                ArabicFontHelper.SetText(levelText, $"المستوى {player.Level}");
 
             if (usernameText != null)
-                usernameText.text = player.Username;
+                ArabicFontHelper.SetText(usernameText, player.Username);
         }
 
         private void OnPlayClicked() => _panelManager?.ShowPanel("GameSelection");

@@ -1,28 +1,44 @@
 using UnityEngine;
 
-namespace KingsDominos.Games.Shared
+namespace KingsDominos.Games
 {
     public abstract class GameBase : MonoBehaviour
     {
         [Header("Game Info")]
-        [SerializeField] protected string gameId;
-        [SerializeField] protected string gameNameAr;
+        public string gameId;
+        public string gameNameAr;
 
-        public string GameId => gameId;
-        public string GameNameAr => gameNameAr;
 
-        protected string _sessionId;
-        protected string _localPlayerId;
-
-        public virtual void Initialize(string sessionId, string localPlayerId)
+        protected virtual void Awake()
         {
-            _sessionId = sessionId;
-            _localPlayerId = localPlayerId;
+            
         }
 
-        public abstract void StartGame();
-        public abstract void HandleMove(string playerId, string action, object data);
-        public abstract bool IsGameOver();
-        public abstract void Cleanup();
+
+        public virtual void StartGame()
+        {
+            Debug.Log($"{gameNameAr} Started");
+        }
+
+
+        public virtual void HandleMove(
+            string playerId,
+            string moveType,
+            object data)
+        {
+            Debug.Log($"Move: {moveType}");
+        }
+
+
+        public virtual bool IsGameOver()
+        {
+            return false;
+        }
+
+
+        public virtual void Cleanup()
+        {
+            Debug.Log($"{gameNameAr} Cleanup");
+        }
     }
 }

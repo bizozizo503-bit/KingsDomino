@@ -48,9 +48,9 @@ namespace KingsDominos.UI.Panels
             AutoWire();
             var player = GameManager.Instance.PlayerData;
 
-            if (usernameText != null) usernameText.text = player.Username;
-            if (levelText != null) levelText.text = $"المستوى {player.Level}";
-            if (xpText != null) xpText.text = $"XP: {player.XP}";
+            ArabicFontHelper.SetText(usernameText, player.Username);
+            ArabicFontHelper.SetText(levelText, $"المستوى {player.Level}");
+            ArabicFontHelper.SetText(xpText, $"نقاط الخبرة: {player.XP}");
         }
 
         private void OnBackClicked() => _panelManager?.GoBack();

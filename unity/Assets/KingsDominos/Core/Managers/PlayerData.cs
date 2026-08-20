@@ -27,7 +27,7 @@ namespace KingsDominos.Managers
         public void Load()
         {
             UserId = PlayerPrefs.GetString(KEY_USER_ID, "");
-            Username = PlayerPrefs.GetString(KEY_USERNAME, "Player");
+            Username = PlayerPrefs.GetString(KEY_USERNAME, "لاعب");
             Gold = PlayerPrefs.GetInt(KEY_GOLD, 12500);
             Level = PlayerPrefs.GetInt(KEY_LEVEL, 1);
             XP = PlayerPrefs.GetInt(KEY_XP, 0);

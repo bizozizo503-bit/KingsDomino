@@ -23,7 +23,7 @@ namespace KingsDominos.UI.Panels
             _panelManager = panelManager;
             AutoWire();
             backButton?.onClick.AddListener(OnBackClicked);
-            if (headerText != null) headerText.text = "المتجر";
+            if (headerText != null) ArabicFontHelper.SetText(headerText, "المتجر");
             RefreshGold();
         }
 
@@ -45,7 +45,7 @@ namespace KingsDominos.UI.Panels
         {
             AutoWire();
             if (goldText != null)
-                goldText.text = Managers.GameManager.Instance.PlayerData.Gold.ToString("N0");
+                ArabicFontHelper.SetText(goldText, Managers.GameManager.Instance.PlayerData.Gold.ToString("N0"));
         }
 
         private void OnBackClicked() => _panelManager?.GoBack();

@@ -62,11 +62,15 @@ namespace KingsDominos
             var labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             labelObj.transform.SetParent(obj.transform, false);
             var txt = labelObj.GetComponent<TextMeshProUGUI>();
-            txt.text = label;
+            txt.text = UI.ArabicTextShaper.Shape(label);
             txt.fontSize = 28;
             txt.color = Color.white;
             txt.alignment = TextAlignmentOptions.Center;
             txt.fontStyle = FontStyles.Bold;
+            txt.characterSpacing = -5f;
+            txt.textWrappingMode = TextWrappingModes.NoWrap;
+            txt.overflowMode = TextOverflowModes.Ellipsis;
+            txt.isRightToLeftText = true;
 
             var labelRect = labelObj.GetComponent<RectTransform>();
             labelRect.anchorMin = Vector2.zero;
@@ -83,11 +87,15 @@ namespace KingsDominos
             obj.transform.SetParent(parent, false);
 
             var txt = obj.GetComponent<TextMeshProUGUI>();
-            txt.text = value;
+            txt.text = UI.ArabicTextShaper.Shape(value);
             txt.fontSize = size;
             txt.color = color;
             txt.alignment = alignment;
             txt.fontStyle = FontStyles.Bold;
+            txt.characterSpacing = -5f;
+            txt.textWrappingMode = TextWrappingModes.NoWrap;
+            txt.overflowMode = TextOverflowModes.Ellipsis;
+            txt.isRightToLeftText = true;
 
             return txt;
         }

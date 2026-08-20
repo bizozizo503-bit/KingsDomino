@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace KingsDominos.Core
+namespace KingsDominos
 {
     public abstract class Singleton<T> : MonoBehaviour where T : MonoBehaviour
     {
@@ -21,7 +21,7 @@ namespace KingsDominos.Core
                 {
                     if (_instance == null)
                     {
-                        _instance = FindObjectOfType<T>();
+                        _instance = FindFirstObjectByType<T>();
 
                         if (_instance == null)
                         {

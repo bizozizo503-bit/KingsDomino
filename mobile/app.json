@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Ù…Ù„ÙˆÙƒ Ø§Ù„Ø¯ÙˆÙ…ÙŠÙ†Ùˆ",
+    "slug": "kings-domino",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "kingsdomino",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "com.bizozizo503.kingsdomino"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-splash-screen"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d30d9c31-6c54-4260-9d4c-2794bfc787f8"
+      }
+    }
+  }
+}

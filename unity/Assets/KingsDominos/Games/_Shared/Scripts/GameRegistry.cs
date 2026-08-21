@@ -9,13 +9,13 @@ namespace KingsDominos.Games
     {
         private readonly List<GameDefinition> _games = new();
         private readonly Dictionary<string, System.Type> _types = new();
-
         public IReadOnlyList<GameDefinition> AllGames => _games;
 
         protected override void Awake()
         {
             base.Awake();
             if (_games.Count == 0) BuildRegistry();
+            RegisterBuiltIns();
         }
 
         private void BuildRegistry()

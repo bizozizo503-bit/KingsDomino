@@ -1,4 +1,5 @@
 using UnityEngine;
+using KingsDominos;
 using KingsDominos.Games.Domino;
 
 namespace KingsDominos.Games
@@ -36,7 +37,6 @@ namespace KingsDominos.Games
             }
 
             UnloadActiveGame();
-
             _activeRoot = new GameObject($"Game_{definition.Id}");
             _activeRoot.transform.SetParent(transform, false);
 

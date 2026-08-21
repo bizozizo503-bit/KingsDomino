@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using KingsDominos.Managers;
+using KingsDominos.Games;
 
 namespace KingsDominos.UI.Panels
 {
@@ -14,7 +14,6 @@ namespace KingsDominos.UI.Panels
         private Button cardTab;
         private Button casualTab;
         private Transform gameGrid;
-
         private PanelManager _panelManager;
         private string _currentCategory = "all";
         private bool _wired;
@@ -23,16 +22,12 @@ namespace KingsDominos.UI.Panels
         {
             _panelManager = panelManager;
             AutoWire();
-
             backButton?.onClick.AddListener(OnBackClicked);
             allTab?.onClick.AddListener(() => FilterGames("all"));
             boardTab?.onClick.AddListener(() => FilterGames("board"));
             cardTab?.onClick.AddListener(() => FilterGames("card"));
             casualTab?.onClick.AddListener(() => FilterGames("casual"));
-
-            if (headerText != null)
-                ArabicFontHelper.SetText(headerText, "اختر اللعبة");
-
+            if (headerText != null) ArabicFontHelper.SetText(headerText, "اختر اللعبة");
             PopulateGames();
         }
 
@@ -51,94 +46,58 @@ namespace KingsDominos.UI.Panels
 
         private void PopulateGames()
         {
-            if (gameGrid == null) return;
-
-            foreach (Transform child in gameGrid)
-                Object.Destroy(child.gameObject);
-
-            var games = new (string id, string nameAr, string category, string players)[]
-            {
-                ("domino", "الدومينو", "board", "2-4"),
-                ("ludo", "لودو", "board", "2-4"),
-                ("chess", "الشطرنج", "board", "2"),
-                ("backgammon", "الطاولة", "board", "2"),
-                ("baloot", "البلوت", "card", "4"),
-                ("uno", "يونو", "card", "2-6"),
-                ("pool", "البلياردو", "casual", "2"),
-                ("bingo", "البينجو", "casual", "1-100"),
-            };
-
-            foreach (var game in games)
-            {
-                if (_currentCategory != "all" && game.category != _currentCategory)
-                    continue;
-                CreateGameCard(game.id, game.nameAr, game.players);
-            }
+            if (gameGrid == null || GameRegistry.Instance == null) return;
+            foreach (Transform child in gameGrid) Object.Destroy(child.gameObject);
+            foreach (var game in GameRegistry.Instance.GetByCategory(_currentCategory))
+                CreateGameCard(game);
         }
 
-        private void CreateGameCard(string gameId, string nameAr, string players)
+        private void CreateGameCard(GameDefinition game)
         {
-            var obj = new GameObject($"Card_{gameId}", typeof(RectTransform), typeof(Image), typeof(Button));
+            var obj = new GameObject($"Card_{game.gameId}", typeof(RectTransform), typeof(Image), typeof(Button));
             obj.transform.SetParent(gameGrid, false);
             obj.GetComponent<RectTransform>().sizeDelta = new Vector2(280, 200);
-            obj.GetComponent<Image>().color = new Color(0.15f, 0.08f, 0.25f);
-
-            var btn = obj.GetComponent<Button>();
-            btn.onClick.AddListener(() => OnGameSelected(gameId));
+            obj.GetComponent<Image>().color = game.IsPlayable ? new Color(0.15f, 0.08f, 0.25f) : new Color(0.08f, 0.08f, 0.10f);
+            obj.GetComponent<Button>().onClick.AddListener(() => OnGameSelected(game.gameId));
 
             var nameObj = new GameObject("Name", typeof(RectTransform), typeof(TextMeshProUGUI));
             nameObj.transform.SetParent(obj.transform, false);
             var nameTxt = nameObj.GetComponent<TextMeshProUGUI>();
             nameTxt.fontSize = 30;
-            nameTxt.color = Color.white;
             nameTxt.alignment = TextAlignmentOptions.Center;
             nameTxt.fontStyle = FontStyles.Bold;
             ArabicFontHelper.ApplyToText(nameTxt);
-            ArabicFontHelper.SetText(nameTxt, nameAr);
+            ArabicFontHelper.SetText(nameTxt, game.displayNameAr);
             var nr = nameObj.GetComponent<RectTransform>();
-            nr.anchorMin = new Vector2(0, 0.5f);
-            nr.anchorMax = new Vector2(1, 0.85f);
-            nr.offsetMin = Vector2.zero;
-            nr.offsetMax = Vector2.zero;
+            nr.anchorMin = new Vector2(0, 0.5f); nr.anchorMax = new Vector2(1, 0.85f); nr.offsetMin = Vector2.zero; nr.offsetMax = Vector2.zero;
 
             var infoObj = new GameObject("Info", typeof(RectTransform), typeof(TextMeshProUGUI));
             infoObj.transform.SetParent(obj.transform, false);
             var infoTxt = infoObj.GetComponent<TextMeshProUGUI>();
-            infoTxt.fontSize = 22;
-            infoTxt.color = new Color(0.7f, 0.7f, 0.7f);
+            infoTxt.fontSize = 20;
             infoTxt.alignment = TextAlignmentOptions.Center;
             ArabicFontHelper.ApplyToText(infoTxt);
-            ArabicFontHelper.SetText(infoTxt, $"{players} لاعبين");
+            ArabicFontHelper.SetText(infoTxt, game.IsPlayable ? $"{game.PlayersText} لاعبين" : "قريبًا");
             var ir = infoObj.GetComponent<RectTransform>();
-            ir.anchorMin = new Vector2(0, 0.15f);
-            ir.anchorMax = new Vector2(1, 0.4f);
-            ir.offsetMin = Vector2.zero;
-            ir.offsetMax = Vector2.zero;
+            ir.anchorMin = new Vector2(0, 0.15f); ir.anchorMax = new Vector2(1, 0.4f); ir.offsetMin = Vector2.zero; ir.offsetMax = Vector2.zero;
         }
 
-        private void FilterGames(string category)
-        {
-            _currentCategory = category;
-            PopulateGames();
-        }
+        private void FilterGames(string category) { _currentCategory = category; PopulateGames(); }
 
         private void OnGameSelected(string gameId)
         {
-            Debug.Log($"[GameSelection] Selected: {gameId}");
+            var game = GameRegistry.Instance?.Get(gameId);
+            if (game == null || !game.IsPlayable)
+            {
+                Debug.Log($"[GameSelection] {gameId}: قريبًا");
+                return;
+            }
+            if (!GameLoader.Instance.LoadGame(gameId))
+                Debug.LogError($"[GameSelection] Failed to load {gameId}");
         }
 
         private void OnBackClicked() => _panelManager?.GoBack();
-
-        private Button GetChildButton(string name)
-        {
-            var t = transform.Find(name);
-            return t != null ? t.GetComponent<Button>() : null;
-        }
-
-        private TMP_Text GetChildText(string name)
-        {
-            var t = transform.Find(name);
-            return t != null ? t.GetComponent<TMP_Text>() : null;
-        }
+        private Button GetChildButton(string name) { var t = transform.Find(name); return t != null ? t.GetComponent<Button>() : null; }
+        private TMP_Text GetChildText(string name) { var t = transform.Find(name); return t != null ? t.GetComponent<TMP_Text>() : null; }
     }
 }

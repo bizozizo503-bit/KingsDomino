@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2b02dcee847758b4cbc6a378a0a79d45, type: 3}
+  m_Name: GameConfig
+  m_EditorClassIdentifier:
+  apiBaseUrl: http://localhost:3000/api
+  wsUrl: ws://localhost:3000
+  gameVersion: 1.0.0
+  startingGold: 12500
+  dailyRewardBase: 100
+  panelTransitionDuration: 0.3
+  maxChatMessageLength: 500
+  defaultLanguage: ar

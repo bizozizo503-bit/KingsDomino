@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using KingsDominos.Games;
 using KingsDominos.Managers;
 
 namespace KingsDominos.UI.Panels
@@ -23,16 +24,12 @@ namespace KingsDominos.UI.Panels
         {
             _panelManager = panelManager;
             AutoWire();
-
             backButton?.onClick.AddListener(OnBackClicked);
             allTab?.onClick.AddListener(() => FilterGames("all"));
             boardTab?.onClick.AddListener(() => FilterGames("board"));
             cardTab?.onClick.AddListener(() => FilterGames("card"));
             casualTab?.onClick.AddListener(() => FilterGames("casual"));
-
-            if (headerText != null)
-                ArabicFontHelper.SetText(headerText, "اختر اللعبة");
-
+            if (headerText != null) ArabicFontHelper.SetText(headerText, "اختر اللعبة");
             PopulateGames();
         }
 
@@ -52,39 +49,26 @@ namespace KingsDominos.UI.Panels
         private void PopulateGames()
         {
             if (gameGrid == null) return;
-
-            foreach (Transform child in gameGrid)
-                Object.Destroy(child.gameObject);
-
-            var games = new (string id, string nameAr, string category, string players)[]
+            foreach (Transform child in gameGrid) Object.Destroy(child.gameObject);
+            foreach (var game in GameRegistry.All)
             {
-                ("domino", "الدومينو", "board", "2-4"),
-                ("ludo", "لودو", "board", "2-4"),
-                ("chess", "الشطرنج", "board", "2"),
-                ("backgammon", "الطاولة", "board", "2"),
-                ("baloot", "البلوت", "card", "4"),
-                ("uno", "يونو", "card", "2-6"),
-                ("pool", "البلياردو", "casual", "2"),
-                ("bingo", "البينجو", "casual", "1-100"),
-            };
-
-            foreach (var game in games)
-            {
-                if (_currentCategory != "all" && game.category != _currentCategory)
-                    continue;
-                CreateGameCard(game.id, game.nameAr, game.players);
+                if (_currentCategory != "all" && game.Category != _currentCategory) continue;
+                CreateGameCard(game);
             }
         }
 
-        private void CreateGameCard(string gameId, string nameAr, string players)
+        private void CreateGameCard(GameDefinition game)
         {
-            var obj = new GameObject($"Card_{gameId}", typeof(RectTransform), typeof(Image), typeof(Button));
+            var obj = new GameObject($"Card_{game.Id}", typeof(RectTransform), typeof(Image), typeof(Button));
             obj.transform.SetParent(gameGrid, false);
             obj.GetComponent<RectTransform>().sizeDelta = new Vector2(280, 200);
-            obj.GetComponent<Image>().color = new Color(0.15f, 0.08f, 0.25f);
+            obj.GetComponent<Image>().color = game.Implemented
+                ? new Color(0.15f, 0.08f, 0.25f)
+                : new Color(0.10f, 0.10f, 0.13f);
 
             var btn = obj.GetComponent<Button>();
-            btn.onClick.AddListener(() => OnGameSelected(gameId));
+            btn.interactable = game.Implemented;
+            btn.onClick.AddListener(() => OnGameSelected(game.Id));
 
             var nameObj = new GameObject("Name", typeof(RectTransform), typeof(TextMeshProUGUI));
             nameObj.transform.SetParent(obj.transform, false);
@@ -94,7 +78,7 @@ namespace KingsDominos.UI.Panels
             nameTxt.alignment = TextAlignmentOptions.Center;
             nameTxt.fontStyle = FontStyles.Bold;
             ArabicFontHelper.ApplyToText(nameTxt);
-            ArabicFontHelper.SetText(nameTxt, nameAr);
+            ArabicFontHelper.SetText(nameTxt, game.NameAr);
             var nr = nameObj.GetComponent<RectTransform>();
             nr.anchorMin = new Vector2(0, 0.5f);
             nr.anchorMax = new Vector2(1, 0.85f);
@@ -108,7 +92,7 @@ namespace KingsDominos.UI.Panels
             infoTxt.color = new Color(0.7f, 0.7f, 0.7f);
             infoTxt.alignment = TextAlignmentOptions.Center;
             ArabicFontHelper.ApplyToText(infoTxt);
-            ArabicFontHelper.SetText(infoTxt, $"{players} لاعبين");
+            ArabicFontHelper.SetText(infoTxt, game.Implemented ? $"{game.Players} لاعبين" : "قريبًا");
             var ir = infoObj.GetComponent<RectTransform>();
             ir.anchorMin = new Vector2(0, 0.15f);
             ir.anchorMax = new Vector2(1, 0.4f);
@@ -124,7 +108,22 @@ namespace KingsDominos.UI.Panels
 
         private void OnGameSelected(string gameId)
         {
-            Debug.Log($"[GameSelection] Selected: {gameId}");
+            var definition = GameRegistry.Get(gameId);
+            if (definition == null || !definition.Implemented)
+            {
+                Debug.LogWarning($"[GameSelection] Game is not implemented: {gameId}");
+                return;
+            }
+
+            var loader = FindFirstObjectByType<GameLoader>();
+            if (loader == null)
+            {
+                var loaderObject = new GameObject("GameLoader");
+                loader = loaderObject.AddComponent<GameLoader>();
+            }
+
+            if (loader.Load(gameId))
+                Debug.Log($"[GameSelection] Loaded game: {gameId}");
         }
 
         private void OnBackClicked() => _panelManager?.GoBack();
